@@ -6586,6 +6586,8 @@ let syncDirty=false;        // có thay đổi chưa đẩy lên Drive
 let pushInFlight=false;     // đang đẩy
 let pushRetry=0;            // số lần thử lại
 function setSync(state){ // idle|ok|busy|err|dirty
+  // Khi chạy trong APK: cơ chế Drive NATIVE điều khiển nút chấm, bỏ qua cơ chế web cũ
+  if(typeof IS_NATIVE_APP!=='undefined' && IS_NATIVE_APP) return;
   const d=document.getElementById('syncDot'); if(!d) return;
   d.className='sync-dot'+(state==='ok'?' ok':state==='busy'?' busy':state==='err'?' err':state==='dirty'?' dirty':'');
   d.title = state==='ok'?'Đã đồng bộ Drive':state==='busy'?'Đang đồng bộ…':state==='err'?'Lỗi đồng bộ — sẽ tự thử lại':state==='dirty'?'Có thay đổi chưa đồng bộ':'Chưa kết nối Drive';
@@ -6701,6 +6703,8 @@ async function drivePasteToken(){
   }
 }
 function schedulePush(){
+  // Trong APK: dùng Drive native, không dùng cơ chế web cũ (bị Google chặn + gây kẹt nút vàng)
+  if(typeof IS_NATIVE_APP!=='undefined' && IS_NATIVE_APP) return;
   syncDirty=true;
   if(!gisToken){ setSync('dirty'); return; }
   setSync('dirty');
