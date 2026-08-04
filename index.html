@@ -25,7 +25,7 @@
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 button,.tab,.proj-row,.drill-row,.grp>.ghead,.card.coll>h2,.icon-opt,.choice-btn,.loc-chip,.pg-item-row,.edit-btn,.mv-btn,.row-act,.mini-btn,.sync-dot,.fab-main,.fab-mini .b,.seg button,.sortSeg button,.statusSeg button,.search-x,.drill-back,.pill.st-unpaid,.pill.st-advance,.pill.st-paid,.attChip .rm,.attChip .nm,.crumb-link{touch-action:manipulation;-webkit-user-select:none;user-select:none}
-/* hit area tối thiểu cho mọi nút nhỏ trên mobile... */
+/* hit area tối thiểu cho mọi nút nhỏ trên mobile */
 @media (pointer:coarse){
   .edit-btn,.mv-btn,.row-act,.search-x,.drill-back,.sync-dot{min-width:48px!important;min-height:48px!important}
   .seg button,.sortSeg button{min-height:40px;padding:10px 8px}
@@ -3186,7 +3186,7 @@ function resetAcctTxns(acctId){
   a.txns=[];
   save(); closeModal(); renderAll(); toast('Đã reset giao dịch tài khoản');
 }
-/* ---------- BÁO CÁO. ---------- */
+/* ---------- BÁO CÁO ---------- */
 /* ==================== BIỂU ĐỒ SVG (thuần, không thư viện) ==================== */
 const CHART_PAL=['#0f766e','#0891b2','#f59e0b','#8b5cf6','#ec4899','#10b981','#ef4444','#3b82f6'];
 function svgWrap(inner,w,h){ return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block;font-family:inherit">${inner}</svg>`; }
@@ -3671,6 +3671,7 @@ function renderCai(p){
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="scanDuplicates()">🔍 Quét giao dịch trùng lặp</button>
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="openHistory()">🕘 Lịch sử phiên bản (khôi phục sửa/xóa nhầm)</button>
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="renderAuditLog()">📋 Nhật ký thay đổi (${Array.isArray(DB.audit)?DB.audit.length:0} thao tác)</button>
+    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="checkUpdateNow()">🔄 Kiểm tra cập nhật</button>
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="showStorageInfo()">📊 Xem dung lượng đã dùng</button>
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="setupPin()">🔒 ${DB.pin?'Đổi / gỡ mã PIN':'Đặt mã PIN khoá app'}</button>
   </div>
@@ -6795,7 +6796,11 @@ async function drivePull(){
     setSync('ok'); renderAll(); toast('Đã khôi phục từ Drive');
   }catch(e){ setSync('err'); toast('Lỗi khôi phục'); console.error(e); }
 }
-function manualSync(){ if(!gisToken){ driveConnect(); } else drivePush(); }
+function manualSync(){
+  // Trong APK: dùng Drive native. Ngoài trình duyệt: cơ chế web cũ.
+  if(typeof IS_NATIVE_APP!=='undefined' && IS_NATIVE_APP){ driveBackupNow(); return; }
+  if(!gisToken){ driveConnect(); } else drivePush();
+}
 // Hướng dẫn đóng gói APK có Drive (TWA)
 function showApkGuide(){
   document.getElementById('sheet').innerHTML=`
@@ -7160,7 +7165,120 @@ function setupPin(){
 }
 window.addEventListener('load',()=>{ applyTabOrder(); renderAll(); captureTokenFromUrl(); reconcileStores(); showPinLock(); setTimeout(initGis,600); setTimeout(checkBackupReminder,1500); });
 // OTA: native báo đã tải bản mới → nhắc nhẹ, mở lại app sẽ dùng bản mới
-window.__onOtaReady = function(){ try{ toast('✅ Đã có bản cập nhật mới — mở lại app để áp dụng'); }catch(e){} };
+window.__onOtaReady = function(manual){ try{
+  if(manual) { if(confirm('✅ Đã tải bản cập nhật mới!\n\nMở lại app ngay để áp dụng?')) location.reload();  }
+  else toast('✅ Đã có bản cập nhật mới — mở lại app để áp dụng');
+}catch(e){} };
+// Kết quả kiểm tra cập nhật thủ công
+window.__onDriveResult = window.__onDriveResult || function(){};
+(function(){
+  var _prev = window.__onDriveResult;
+  window.__onDriveResult = function(op, ok, msg){
+    if(op==='update'){
+      if(ok && msg==='no-change') toast('✓ Bạn đang dùng bản mới nhất');
+      else if(!ok) toast('Kiểm tra cập nhật: '+msg);
+      return;
+    }
+    return _prev(op, ok, msg);
+  };
+})();
+// Nút bấm kiểm tra cập nhật
+function checkUpdateNow(){
+  if(window.AndroidDrive && typeof window.AndroidDrive.checkUpdate==='function'){
+    toast('Đang kiểm tra cập nhật…');
+    window.AndroidDrive.checkUpdate();
+  } else {
+    toast('Chức năng này chỉ có trong app đã cài (APK)');
+  }
+}
+
+/* ==================== CẦU NỐI GOOGLE DRIVE NATIVE (chạy trong APK) ====================
+   Khi chạy trong app native (có window.AndroidDrive), dùng OAuth native — KHÔNG dùng
+   ô Client ID cũ (cách web bị Google chặn trong WebView). */
+var IS_NATIVE_APP = (typeof window.AndroidDrive !== 'undefined' && window.AndroidDrive && window.AndroidDrive.isAvailable && window.AndroidDrive.isAvailable());
+
+// Native báo kết quả thao tác Drive
+(function(){
+  var _prev = window.__onDriveResult || function(){};
+  window.__onDriveResult = function(op, ok, msg){
+    if(op==='backup'){
+      if(ok){ if(typeof markBackupDone==='function') markBackupDone(); toast('✅ Đã sao lưu lên Google Drive'); }
+      else toast('Sao lưu Drive lỗi: '+msg);
+      return;
+    }
+    if(op==='connect'){ toast(ok?'✅ Đã kết nối Google Drive':'Kết nối Drive lỗi: '+msg); return; }
+    if(op==='restore' && !ok){ toast(msg==='no-backup'?'Chưa có bản sao lưu nào trên Drive':('Khôi phục lỗi: '+msg)); return; }
+    return _prev(op, ok, msg);
+  };
+})();
+
+// Native tải xong nội dung backup từ Drive (base64)
+window.__onDriveRestore = async function(b64){
+  try{
+    var text = decodeURIComponent(escape(atob(b64)));
+    var parsed = JSON.parse(text);
+    var data, atts=null;
+    if(parsed && parsed._format==='qlcp-backup' && parsed.db){ data=parsed.db; atts=parsed.attachments||{}; }
+    else data=parsed;
+    if(!data || !Array.isArray(data.projects)){ toast('Dữ liệu Drive không hợp lệ'); return; }
+    var attCount = atts?Object.keys(atts).length:0;
+    if(!confirm('Khôi phục từ Drive sẽ THAY THẾ toàn bộ dữ liệu hiện tại'+(attCount?(' (kèm '+attCount+' chứng từ)'):'')+'. Tiếp tục?')) return;
+    if(atts && attCount){ for(var id of Object.keys(atts)){ try{ var a=atts[id]; if(a&&a.data) await attPut(id, base64ToBlob(a.data, a.type)); }catch(e){} } }
+    DB = migrate(data);
+    CUR = DB.projects[0]?DB.projects[0].id:null;
+    save(); if(typeof drillReset==='function') drillReset(); applyTabOrder(); renderAll();
+    toast('✅ Đã khôi phục '+DB.projects.length+' dự án từ Drive'+(attCount?(' + '+attCount+' chứng từ'):''));
+  }catch(e){ toast('Lỗi khôi phục Drive: '+e.message); }
+};
+
+async function driveBackupNow(){
+  if(!IS_NATIVE_APP){ toast('Chức năng Drive tự động chỉ chạy trong app đã cài (APK)'); return; }
+  try{
+    toast('Đang gom dữ liệu + chứng từ…');
+    var full = await buildFullBackup();
+    window.AndroidDrive.backup(JSON.stringify(full));
+    toast('Đang đẩy lên Google Drive…');
+  }catch(e){ toast('Lỗi chuẩn bị sao lưu: '+e.message); }
+}
+function driveRestoreNow(){
+  if(!IS_NATIVE_APP){ toast('Chức năng Drive chỉ chạy trong app đã cài (APK)'); return; }
+  toast('Đang tải bản sao lưu từ Drive…');
+  window.AndroidDrive.restore();
+}
+
+// Chèn nút Drive native vào tab Cài đặt (chỉ khi chạy trong APK)
+function injectDriveButtons(){
+  if(!IS_NATIVE_APP) return;
+  if(document.getElementById('driveNativeBox')) return;
+  var anchor = document.querySelector('#pageCai');
+  if(!anchor) return;
+  var box = document.createElement('div');
+  box.className='card'; box.id='driveNativeBox';
+  box.style.cssText='background:linear-gradient(135deg,#0d6e66,#134e4a);color:#fff';
+  box.innerHTML =
+    '<div style="font-weight:700;margin-bottom:6px">☁️ Google Drive (tự động)</div>'+
+    '<div style="font-size:13px;opacity:.9;margin-bottom:10px">Sao lưu & khôi phục dữ liệu kèm chứng từ. Tự động sao lưu định kỳ khi có thay đổi.</div>'+
+    '<button class="btn" style="width:100%;background:#fff;color:#0d6e66" onclick="driveBackupNow()">⬆️ Sao lưu lên Drive ngay</button>'+
+    '<button class="btn sec" style="width:100%;margin-top:8px;border-color:#fff;color:#fff" onclick="driveRestoreNow()">⬇️ Khôi phục từ Drive</button>';
+  anchor.insertBefore(box, anchor.firstChild);
+}
+
+// Tự động sao lưu Drive mỗi 5 phút nếu có thay đổi
+var __lastDriveBackupAt = 0;
+if(IS_NATIVE_APP){
+  (function(){ var _save=window.save; window.save=function(){ try{ if(DB) DB.__lastChange=Date.now(); }catch(e){} return _save.apply(this,arguments); }; })();
+  window.addEventListener('load', function(){
+    setTimeout(injectDriveButtons, 800);
+    // Nút chấm trên tiêu đề: sáng xanh + đổi chú thích (bấm = sao lưu Drive)
+    var dot=document.getElementById('syncDot');
+    if(dot){ dot.classList.add('ok'); dot.title='Sao lưu lên Google Drive'; }
+    var _rc = window.renderCai;
+    if(typeof _rc==='function'){ window.renderCai=function(){ var r=_rc.apply(this,arguments); setTimeout(injectDriveButtons,50); return r; }; }
+    setInterval(function(){
+      try{ var lc=DB.__lastChange||0; if(lc>__lastDriveBackupAt && (Date.now()-__lastDriveBackupAt>5*60*1000)){ __lastDriveBackupAt=Date.now(); driveBackupNow(); } }catch(e){}
+    }, 60*1000);
+  });
+}
 
 </script>
 </body>
