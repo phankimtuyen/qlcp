@@ -7191,7 +7191,7 @@ var IS_NATIVE_APP = (typeof window.AndroidDrive !== 'undefined' && window.Androi
       clearTimeout(window.__driveTimeout);
       if(ok){
         if(typeof markBackupDone==='function') markBackupDone();
-        DB.__lastDriveSync=Date.now(); save();
+        window.__internalSave=true; DB.__lastDriveSync=Date.now(); save(); window.__internalSave=false;
         setDriveStatus('ok', 'Đã sao lưu Drive lúc '+new Date().toLocaleTimeString('vi-VN'));
         toast('✅ Đã sao lưu lên Google Drive');
       } else { setDriveStatus('err', 'Sao lưu lỗi'); toast('Sao lưu Drive lỗi: '+msg); }
@@ -7307,9 +7307,9 @@ function injectDriveButtons(){
 }
 
 // Tự động sao lưu Drive mỗi 5 phút nếu có thay đổi
-var __lastDriveBackupAt = 0;
+var __lastDriveBackupAt = Date.now();  // khởi tạo = hiện tại, tránh backup ngay khi mở app
 if(IS_NATIVE_APP){
-  (function(){ var _save=window.save; window.save=function(){ try{ if(DB) DB.__lastChange=Date.now(); }catch(e){} return _save.apply(this,arguments); }; })();
+  (function(){ var _save=window.save; window.save=function(){ try{ if(DB && !window.__internalSave) DB.__lastChange=Date.now(); }catch(e){} return _save.apply(this,arguments); }; })();
   window.addEventListener('load', function(){
     setTimeout(injectDriveButtons, 800);
     // Nút chấm trên tiêu đề: sáng xanh + đổi chú thích (bấm = sao lưu Drive)
