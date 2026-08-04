@@ -56,6 +56,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;touch-action:manipulation}
 .sync-dot .d{width:11px;height:11px;border-radius:50%;background:#94a3b8;transition:.3s}
 .sync-dot.ok .d{background:#4ade80;box-shadow:0 0 6px #4ade80}
+.sync-dot.syncing .d{background:#fbbf24;box-shadow:0 0 6px #fbbf24;animation:syncPulse 1s ease infinite}
+.sync-dot.err .d{background:#f87171;box-shadow:0 0 6px #f87171}
+@keyframes syncPulse{0%,100%{opacity:1}50%{opacity:.35}}
 .sync-dot.busy .d{background:#fbbf24;animation:pulse 1s infinite}
 .sync-dot.err .d{background:#f87171}
 .sync-dot.dirty .d{background:#fbbf24;box-shadow:0 0 5px #fbbf24}
@@ -3633,24 +3636,7 @@ function renderCai(p){
   </div>
   <div class="card">
     <h2>☁️ Sao lưu Google Drive</h2>
-    <div class="hint" style="margin-bottom:10px">Đồng bộ dữ liệu lên Google Drive cá nhân của bạn để không mất khi đổi/hỏng máy.</div>
-    <label>Google OAuth Client ID</label>
-    <input type="text" value="${esc(DB.driveClientId||'')}" placeholder="xxxxx.apps.googleusercontent.com"
-      onchange="DB.driveClientId=this.value.trim();save();initGis()">
-    <div class="row" style="margin-top:10px">
-      <button class="btn ghost sm" onclick="driveConnect()">Kết nối Drive</button>
-      <button class="btn sec sm" onclick="drivePull()">Khôi phục từ Drive</button>
-    </div>
-    <button class="btn sm" style="margin-top:8px;width:100%" onclick="autoLocalBackup()">💾 Tải bản sao lưu ngay (.json)</button>
-    <div class="hint" id="driveStatus">Trạng thái: chưa kết nối</div>
-    <details><summary>Cách lấy Client ID (làm 1 lần)</summary>
-      <div class="hint" style="line-height:1.7">1. Vào console.cloud.google.com → tạo Project.<br>
-      2. APIs &amp; Services → bật "Google Drive API".<br>
-      3. OAuth consent screen → External → thêm email của bạn vào Test users.<br>
-      4. Credentials → Create OAuth client ID → chọn <b>Android</b> (dán package name & SHA-1 của APK) hoặc <b>Web</b>.<br>
-      5. Copy Client ID dán vào ô trên.</div>
-    </details>
-    <div class="hint" style="margin-top:8px;color:#047857">Khi chạy trong APK, app tự dùng luồng đăng nhập phù hợp. Nếu chưa kết nối, cứ dùng nút <b>Tải bản sao lưu .json</b> để giữ dữ liệu an toàn.</div>
+    <div class="hint" style="line-height:1.7">Đồng bộ Google Drive tự động chạy trong <b>app đã cài (APK)</b> — khối "☁️ Google Drive (tự động)" ở đầu trang này. Khi mở bằng trình duyệt, hãy dùng nút <b>Sao lưu ra ngoài máy</b> bên dưới để lưu file .json vào Drive/Zalo/Email.</div>
   </div>
   <div class="card">
     <h2>📤 Xuất báo cáo Excel</h2>
@@ -7202,8 +7188,13 @@ var IS_NATIVE_APP = (typeof window.AndroidDrive !== 'undefined' && window.Androi
   var _prev = window.__onDriveResult || function(){};
   window.__onDriveResult = function(op, ok, msg){
     if(op==='backup'){
-      if(ok){ if(typeof markBackupDone==='function') markBackupDone(); toast('✅ Đã sao lưu lên Google Drive'); }
-      else toast('Sao lưu Drive lỗi: '+msg);
+      clearTimeout(window.__driveTimeout);
+      if(ok){
+        if(typeof markBackupDone==='function') markBackupDone();
+        DB.__lastDriveSync=Date.now(); save();
+        setDriveStatus('ok', 'Đã sao lưu Drive lúc '+new Date().toLocaleTimeString('vi-VN'));
+        toast('✅ Đã sao lưu lên Google Drive');
+      } else { setDriveStatus('err', 'Sao lưu lỗi'); toast('Sao lưu Drive lỗi: '+msg); }
       return;
     }
     if(op==='connect'){ toast(ok?'✅ Đã kết nối Google Drive':'Kết nối Drive lỗi: '+msg); return; }
@@ -7226,19 +7217,62 @@ window.__onDriveRestore = async function(b64){
     if(atts && attCount){ for(var id of Object.keys(atts)){ try{ var a=atts[id]; if(a&&a.data) await attPut(id, base64ToBlob(a.data, a.type)); }catch(e){} } }
     DB = migrate(data);
     CUR = DB.projects[0]?DB.projects[0].id:null;
+    DB.__lastDriveSync=Date.now();
     save(); if(typeof drillReset==='function') drillReset(); applyTabOrder(); renderAll();
+    setDriveStatus('ok','Đã khôi phục từ Drive lúc '+new Date().toLocaleTimeString('vi-VN'));
     toast('✅ Đã khôi phục '+DB.projects.length+' dự án từ Drive'+(attCount?(' + '+attCount+' chứng từ'):''));
   }catch(e){ toast('Lỗi khôi phục Drive: '+e.message); }
+};
+
+// Drive báo về thời gian sửa file trên Drive → nếu mới hơn lần sync cuối của máy, hỏi tải về
+window.__onDrivePeek = function(modifiedTimeISO){
+  try{
+    if(!modifiedTimeISO) return;                       // Drive chưa có file
+    var driveTime = Date.parse(modifiedTimeISO);
+    var lastSync = DB.__lastDriveSync || 0;
+    // Drive mới hơn máy hơn 60 giây (tránh báo nhầm do lệch giờ nhẹ) → hỏi
+    if(driveTime > lastSync + 60000){
+      if(confirm('☁️ Trên Google Drive có bản dữ liệu MỚI HƠN máy này.\n\n(Có thể bạn vừa nhập trên máy khác.)\n\nTải bản mới từ Drive về không?')){
+        driveRestoreNow();
+      }
+    }
+  }catch(e){}
 };
 
 async function driveBackupNow(){
   if(!IS_NATIVE_APP){ toast('Chức năng Drive tự động chỉ chạy trong app đã cài (APK)'); return; }
   try{
+    setDriveStatus('sync', 'Đang sao lưu lên Drive…');
     toast('Đang gom dữ liệu + chứng từ…');
     var full = await buildFullBackup();
     window.AndroidDrive.backup(JSON.stringify(full));
-    toast('Đang đẩy lên Google Drive…');
-  }catch(e){ toast('Lỗi chuẩn bị sao lưu: '+e.message); }
+    // An toàn: nếu 30s không có phản hồi (vd popup đăng nhập), gỡ trạng thái vàng kẹt
+    clearTimeout(window.__driveTimeout);
+    window.__driveTimeout=setTimeout(function(){
+      var dot=document.getElementById('syncDot');
+      if(dot && dot.classList.contains('syncing')){
+        setDriveStatus('ok', driveStatusText().replace(/^[🟢⚪]\s*/,''));
+      }
+    }, 30000);
+  }catch(e){ setDriveStatus('err','Lỗi'); toast('Lỗi chuẩn bị sao lưu: '+e.message); }
+}
+// Cập nhật trạng thái đồng bộ: nút chấm tiêu đề + dòng chữ trong Cài đặt
+function setDriveStatus(state, text){
+  var dot=document.getElementById('syncDot');
+  if(dot){
+    dot.classList.remove('ok','syncing','err');
+    if(state==='sync') dot.classList.add('syncing');
+    else if(state==='err') dot.classList.add('err');
+    else dot.classList.add('ok');
+  }
+  var line=document.getElementById('driveNativeStatus');
+  if(line) line.textContent=text||'';
+}
+function driveStatusText(){
+  if(DB.__lastDriveSync){
+    return '🟢 Lần sao lưu Drive gần nhất: '+new Date(DB.__lastDriveSync).toLocaleString('vi-VN');
+  }
+  return '⚪ Chưa sao lưu lên Drive lần nào';
 }
 function driveRestoreNow(){
   if(!IS_NATIVE_APP){ toast('Chức năng Drive chỉ chạy trong app đã cài (APK)'); return; }
@@ -7258,6 +7292,7 @@ function injectDriveButtons(){
   box.innerHTML =
     '<div style="font-weight:700;margin-bottom:6px">☁️ Google Drive (tự động)</div>'+
     '<div style="font-size:13px;opacity:.9;margin-bottom:10px">Sao lưu & khôi phục dữ liệu kèm chứng từ. Tự động sao lưu định kỳ khi có thay đổi.</div>'+
+    '<div id="driveNativeStatus" style="font-size:12.5px;background:rgba(255,255,255,.15);border-radius:8px;padding:7px 10px;margin-bottom:10px">'+driveStatusText()+'</div>'+
     '<button class="btn" style="width:100%;background:#fff;color:#0d6e66" onclick="driveBackupNow()">⬆️ Sao lưu lên Drive ngay</button>'+
     '<button class="btn sec" style="width:100%;margin-top:8px;border-color:#fff;color:#fff" onclick="driveRestoreNow()">⬇️ Khôi phục từ Drive</button>';
   anchor.insertBefore(box, anchor.firstChild);
@@ -7272,6 +7307,8 @@ if(IS_NATIVE_APP){
     // Nút chấm trên tiêu đề: sáng xanh + đổi chú thích (bấm = sao lưu Drive)
     var dot=document.getElementById('syncDot');
     if(dot){ dot.classList.add('ok'); dot.title='Sao lưu lên Google Drive'; }
+    // Sau vài giây, kiểm tra âm thầm Drive có bản mới hơn không → hỏi tải về
+    setTimeout(function(){ try{ if(window.AndroidDrive && window.AndroidDrive.peekDrive) window.AndroidDrive.peekDrive(); }catch(e){} }, 3000);
     var _rc = window.renderCai;
     if(typeof _rc==='function'){ window.renderCai=function(){ var r=_rc.apply(this,arguments); setTimeout(injectDriveButtons,50); return r; }; }
     setInterval(function(){
