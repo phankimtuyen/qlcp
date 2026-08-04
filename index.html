@@ -1628,7 +1628,26 @@ function nav(p){
   document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
   const pg=document.getElementById('page'+p); if(pg) pg.classList.add('active');
   const tb=document.querySelector('.tab[data-p="'+p+'"]'); if(tb) tb.classList.add('active');
-  renderAll(); window.scrollTo(0,0);
+  renderOne(p); window.scrollTo(0,0);   // chỉ vẽ tab đang xem → nhanh hơn nhiều
+}
+// Vẽ 1 tab theo tên (thay vì vẽ lại tất cả)
+function renderOne(p){
+  const pr = proj();
+  if(pr){
+    document.getElementById('appTitle').textContent = pr.name;
+    const sub=document.getElementById('appSub');
+    if(sub){ const loc=(LOCATION_GROUPS.find(g=>g.key===pr.location)||{}).name; sub.textContent = (loc?loc+' · ':'')+DB.projects.length+' dự án'; }
+  }
+  try{
+    if(p==='Tong'&&pr) renderTong(pr);
+    else if(p==='Chi'&&pr) renderChi(pr);
+    else if(p==='DoanhMuc') renderDoanhMuc();
+    else if(p==='Tien') renderTien();
+    else if(p==='Congno') renderCongno();
+    else if(p==='Bao'&&pr) renderBao(pr);
+    else if(p==='Cai'&&pr){ renderCai(pr); }
+  }catch(e){ console.error('renderOne',e); }
+  autoFitNumbers();
 }
 // Thứ tự & nhãn các tab (để sắp xếp lại theo ý người dùng)
 const TAB_META={
@@ -7322,7 +7341,7 @@ if(IS_NATIVE_APP){
     // Sau vài giây, kiểm tra âm thầm Drive có bản mới hơn không → hỏi tải về
     setTimeout(function(){ try{ if(window.AndroidDrive && window.AndroidDrive.peekDrive) window.AndroidDrive.peekDrive(); }catch(e){} }, 3000);
     var _rc = window.renderCai;
-    if(typeof _rc==='function'){ window.renderCai=function(){ var r=_rc.apply(this,arguments); setTimeout(injectDriveButtons,50); return r; }; }
+    if(typeof _rc==='function'){ window.renderCai=function(){ var r=_rc.apply(this,arguments); injectDriveButtons(); return r; }; }
     setInterval(function(){
       try{ var lc=DB.__lastChange||0; if(lc>__lastDriveBackupAt && (Date.now()-__lastDriveBackupAt>5*60*1000)){ __lastDriveBackupAt=Date.now(); driveBackupNow(); } }catch(e){}
     }, 60*1000);
