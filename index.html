@@ -755,7 +755,7 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 <div class="asheet" id="asheet"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-var APP_VERSION = 'v2026.08.05-7';  // đổi mỗi lần cập nhật để kiểm tra OTA
+var APP_VERSION = 'v2026.08.05-11';  // đổi mỗi lần cập nhật để kiểm tra OTA
 /* ==================== MENU 3 CHẤM (KEBAB) dùng chung ==================== */
 function kebab(items){
   const id='kb'+Math.random().toString(36).slice(2,8);
@@ -1081,20 +1081,46 @@ function mainDB(){
       if(!db.objectStoreNames.contains(ATT_STORE)) db.createObjectStore(ATT_STORE);
       if(!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
     };
-    req.onsuccess=()=>res(req.result);
-    req.onerror=()=>rej(req.error);
+    req.onsuccess=()=>{
+      const db=req.result;
+      // Nếu kết nối bị đóng bất ngờ (đổi tab, reload OTA…), xóa cache để lần sau mở lại
+      db.onclose=()=>{ _mainDbP=null; };
+      db.onversionchange=()=>{ try{ db.close(); }catch(e){} _mainDbP=null; };
+      res(db);
+    };
+    req.onerror=()=>{ _mainDbP=null; rej(req.error); };
   });
   return _mainDbP;
 }
+// Chạy 1 transaction an toàn: nếu kết nối đang đóng, mở lại DB rồi thử lại 1 lần
+async function idbTx(store, mode, fn){
+  for(let attempt=0; attempt<2; attempt++){
+    let db;
+    try{ db=await mainDB(); }catch(e){ throw e; }
+    try{
+      return await new Promise((res,rej)=>{
+        let tx;
+        try{ tx=db.transaction(store,mode); }
+        catch(e){ _mainDbP=null; rej(e); return; }   // kết nối đóng → xóa cache, thử lại
+        try{ fn(tx.objectStore(store)); }catch(e){ rej(e); return; }
+        tx.oncomplete=()=>res();
+        tx.onerror=()=>rej(tx.error);
+        tx.onabort=()=>rej(tx.error||new Error('tx abort'));
+      });
+    }catch(e){
+      if(attempt===0 && /clos|InvalidStateError/i.test(String(e&&e.message||e))){ _mainDbP=null; continue; }
+      throw e;
+    }
+  }
+}
 async function idbSaveMain(obj){
-  const db=await mainDB();
-  return new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readwrite');
-    tx.objectStore(DB_STORE).put(obj,'current'); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); });
+  try{ await idbTx(DB_STORE,'readwrite',(os)=>{ os.put(obj,'current'); }); }
+  catch(e){ console.warn('idbSaveMain:', e&&e.message||e); }
 }
 async function idbLoadMain(){
-  try{ const db=await mainDB();
-    return await new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readonly');
-      const r=tx.objectStore(DB_STORE).get('current'); r.onsuccess=()=>res(r.result||null); r.onerror=()=>rej(r.error); });
+  try{ let out=null;
+    await idbTx(DB_STORE,'readonly',(os)=>{ const r=os.get('current'); r.onsuccess=()=>{ out=r.result||null; }; });
+    return out;
   }catch(e){ return null; }
 }
 /* ===== LỊCH SỬ PHIÊN BẢN (chống sửa/xóa nhầm) — lưu tối đa 20 mốc trong IndexedDB ===== */
@@ -1102,20 +1128,17 @@ const HIST_KEY='history';
 let _histTimer=null, _lastHistAt=0;
 async function pushHistory(){
   try{
-    const db=await mainDB();
-    const cur=await new Promise((res)=>{ const tx=db.transaction(DB_STORE,'readonly');
-      const r=tx.objectStore(DB_STORE).get(HIST_KEY); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>res([]); });
-    const arr=Array.isArray(cur)?cur:[];
+    let arr=[];
+    await idbTx(DB_STORE,'readonly',(os)=>{ const r=os.get(HIST_KEY); r.onsuccess=()=>{ arr=Array.isArray(r.result)?r.result:[]; }; });
     arr.push({at:Date.now(), rev:DB.rev||0, data:JSON.parse(JSON.stringify(DB))});
     while(arr.length>20) arr.shift();   // giữ 20 mốc gần nhất
-    await new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,'readwrite');
-      tx.objectStore(DB_STORE).put(arr,HIST_KEY); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); });
-  }catch(e){ console.error('pushHistory', e); }
+    await idbTx(DB_STORE,'readwrite',(os)=>{ os.put(arr,HIST_KEY); });
+  }catch(e){ console.warn('pushHistory bỏ qua:', e&&e.message||e); }
 }
 async function loadHistory(){
-  try{ const db=await mainDB();
-    return await new Promise((res)=>{ const tx=db.transaction(DB_STORE,'readonly');
-      const r=tx.objectStore(DB_STORE).get(HIST_KEY); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>res([]); });
+  try{ let out=[];
+    await idbTx(DB_STORE,'readonly',(os)=>{ const r=os.get(HIST_KEY); r.onsuccess=()=>{ out=Array.isArray(r.result)?r.result:[]; }; });
+    return out;
   }catch(e){ return []; }
 }
 // lên lịch lưu 1 mốc lịch sử (gộp nhiều thao tác gần nhau, tối đa mỗi 45s một mốc)
@@ -1379,6 +1402,18 @@ const nowTime = () => { const d=new Date(); const p=x=>String(x).padStart(2,'0')
   return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); };
 // ngày + giờ:phút:giây (nếu có)
 const WEEKDAYS_VN = ['Chủ nhật','Thứ 2','Thứ 3','Thứ 4','Thứ 5','Thứ 6','Thứ 7'];
+// Chuẩn hóa ngày về khóa sắp xếp yyyymmdd — SO ĐÚNG dù lưu dd/mm/yyyy hay yyyy-mm-dd
+function dateSortKey(d){
+  if(!d) return '00000000';
+  d=String(d).trim();
+  var m=d.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);              // yyyy-mm-dd
+  if(m) return m[1]+('0'+m[2]).slice(-2)+('0'+m[3]).slice(-2);
+  m=d.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);       // dd/mm/yyyy
+  if(m) return m[3]+('0'+m[2]).slice(-2)+('0'+m[1]).slice(-2);
+  return '00000000';
+}
+// Khóa sắp xếp gồm cả giờ (mới nhất trước dùng chiều giảm)
+function dtSortKey(x){ return dateSortKey(x.date)+(String(x.time||'').replace(/[^\d:]/g,'').padEnd(8,'0')); }
 function weekdayVN(dateStr){
   if(!dateStr) return '';
   var d=new Date(dateStr+'T00:00:00'); if(isNaN(d)) return '';
@@ -1461,7 +1496,21 @@ function setCatLimit(catId){
 function catCls(id){ return (COST_CATS.find(c=>c.id===id)||{cls:'c-kh'}).cls; }
 
 /* ==================== TOTALS ==================== */
+// Cache kết quả totals theo "vân tay" dữ liệu — chỉ tính lại khi có thay đổi thật.
+// Tránh duyệt lại 682+ giao dịch nhiều lần mỗi khi render (nguồn gây trễ chính).
+const _totalsCache = new WeakMap();
 function totals(p){
+  if(!p) return _computeTotals(p);
+  // vân tay: số giao dịch + revision + các tham số ảnh hưởng kết quả
+  const fp = (p.income?p.income.length:0)+'|'+(p.costs?p.costs.length:0)+'|'+(DB&&DB.rev||0)
+    +'|'+p.taxMode+'|'+p.taxManual+'|'+p.taxRate+'|'+p.vatDivisor+'|'+p.citRate+'|'+p.contractAmount;
+  const c=_totalsCache.get(p);
+  if(c && c.fp===fp) return c.val;
+  const val=_computeTotals(p);
+  _totalsCache.set(p,{fp,val});
+  return val;
+}
+function _computeTotals(p){
   const income = Math.trunc(p.income.reduce((s,x)=>s+Number(x.amount||0),0));
   const adv    = Math.trunc(p.income.filter(x=>x.type==='adv').reduce((s,x)=>s+Number(x.amount||0),0));
   const paidIn = income - adv;
@@ -1683,7 +1732,10 @@ function nav(p){
   document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
   const pg=document.getElementById('page'+p); if(pg) pg.classList.add('active');
   const tb=document.querySelector('.tab[data-p="'+p+'"]'); if(tb) tb.classList.add('active');
-  renderOne(p); window.scrollTo(0,0);   // chỉ vẽ tab đang xem → nhanh hơn nhiều
+  // Vẽ lại tab nếu chưa vẽ hoặc dữ liệu đã đổi (dirty). Nếu đã mới thì khỏi vẽ → nhanh.
+  if(_dirtyTabs[p]!==false){ _renderTab(p); _dirtyTabs[p]=false; }
+  autoFitNumbers();
+  window.scrollTo(0,0);
 }
 // Vẽ 1 tab theo tên (thay vì vẽ lại tất cả)
 function renderOne(p){
@@ -1756,7 +1808,39 @@ function isOpen(k){ return !!OPEN[k]; }
 function toggleCard(k,h){ OPEN[k]=!OPEN[k]; h.parentElement.classList.toggle('open',OPEN[k]); }
 function toggleGrp(k,h){ OPEN[k]=!OPEN[k]; h.parentElement.classList.toggle('open',OPEN[k]); }
 
+// Sau khi dữ liệu đổi: chỉ vẽ lại TAB ĐANG HIỂN THỊ ngay, các tab khác đánh dấu
+// "cần vẽ lại" và sẽ vẽ khi người dùng chuyển sang (tránh dựng lại cả 8 màn mỗi thao tác).
+let _dirtyTabs = {};
 function renderAll(){
+  const p = proj();
+  if(p){
+    document.getElementById('appTitle').textContent = p.name;
+    const sub=document.getElementById('appSub');
+    if(sub){ const loc=(LOCATION_GROUPS.find(g=>g.key===p.location)||{}).name; sub.textContent = (loc?loc+' · ':'')+DB.projects.length+' dự án'; }
+  }
+  // đánh dấu tất cả tab là cần vẽ lại
+  ['Tong','Chi','DoanhMuc','Tien','Congno','Bao','Cai'].forEach(k=>_dirtyTabs[k]=true);
+  // chỉ vẽ ngay tab đang xem
+  const cur = currentTab();
+  if(cur){ _renderTab(cur); _dirtyTabs[cur]=false; }
+  autoFitNumbers();
+}
+function currentTab(){
+  const el=document.querySelector('.tab.active'); return el?el.getAttribute('data-p'):'Tong';
+}
+function _renderTab(p){
+  const pr=proj();
+  try{
+    if(p==='Tong'&&pr) renderTong(pr);
+    else if(p==='Chi'&&pr) renderChi(pr);
+    else if(p==='DoanhMuc') renderDoanhMuc();
+    else if(p==='Tien') renderTien();
+    else if(p==='Congno') renderCongno();
+    else if(p==='Bao'&&pr) renderBao(pr);
+    else if(p==='Cai'&&pr) renderCai(pr);
+  }catch(e){ console.error('_renderTab '+p, e); }
+}
+function renderAllOld_unused(){
   const p = proj();
   renderDoanhMuc();
   renderTien();
@@ -1991,7 +2075,7 @@ function costGroupCard(p,t){
         ${subs.map((sg,si)=>{
           const sk=ck+'-s'+si;
           const spct=catSum? sg.sum/catSum*100:0;
-          const txns=sg.txns.slice().sort((a,b)=>fmtDT(b).localeCompare(fmtDT(a)));
+          const txns=sg.txns.slice().sort((a,b)=>dtSortKey(b).localeCompare(dtSortKey(a)));
           return `<div class="grp ${isOpen(sk)?'open':''}">
             <div class="ghead" onclick="toggleGrp('${sk}',this)">
               <span class="gchev">▶</span>
@@ -2033,12 +2117,12 @@ function openTxnList(kind){
   const dt=t.contract;
   const pctTxt=v=>(dt&&dt>0)?(v/dt*100).toFixed(1)+'%':'—';
   // tách 2 loại, sắp theo ngày+giờ mới nhất, đánh số đợt theo thứ tự thời gian
-  const byTime=(a,b)=>((b.date||'')+(b.time||'')).localeCompare((a.date||'')+(a.time||''));
+  const byTime=(a,b)=>dtSortKey(b).localeCompare(dtSortKey(a));
   const paidList=p.income.filter(x=>x.type!=='adv').slice().sort(byTime);
   const advList =p.income.filter(x=>x.type==='adv').slice().sort(byTime);
   // đánh số đợt theo thứ tự thời gian trên TOÀN BỘ (gộp chung), đợt 1 là sớm nhất
   const orderMap=new Map();
-  [...p.income].slice().sort((a,b)=>((a.date||'')+(a.time||'')).localeCompare((b.date||'')+(b.time||'')))
+  [...p.income].slice().sort((a,b)=>dtSortKey(a).localeCompare(dtSortKey(b)))
     .forEach((x,i)=>orderMap.set(x.id,i+1));
   const rowHtml=x=>`
     <div class="item">
@@ -2085,7 +2169,7 @@ function openTxnList(kind){
 }
 // Danh sách chi phí (mở từ KPI) — giữ định dạng cũ
 function openCostList(p){
-  const list=[...p.costs].sort((a,b)=>((b.date||'')+(b.time||'')).localeCompare((a.date||'')+(a.time||'')));
+  const list=[...p.costs].sort((a,b)=>dtSortKey(b).localeCompare(dtSortKey(a)));
   const sum=list.reduce((s,x)=>s+Number(x.amount||0),0);
   document.getElementById('sheet').innerHTML=`
     <h3>🧾 Chi phí</h3>
@@ -2142,7 +2226,7 @@ function renderDrill(where){
     if(!groups.length){ el.innerHTML=head+'<div class="empty">Chưa có chi phí nào</div>'; return; }
     body=`<div class="drill-total">Tổng: <b class="num">${fmtFull(total)}</b></div>`+
       groups.map((g,i)=>rowBar(g.name,g.amount,g.pct,groupColor(i),g.isSuper,
-        `onclick="${g.isSuper?`drillOpenParent('${where}','${jsq(g.name)}')`:`drillOpenSubDirect('${where}','${jsq(g.name)}')`}"`)).join('');
+        `onclick="${g.isSuper?`drillOpenParent('${where}','${jsq(g.name)}')`:`drillOpenSubDirect('${where}','${jsq(g.name)}')`}"`, g.cat)).join('');
   }
   else if(st.level===1){
     // Cấp 1: nhóm con bên trong nhóm cha
@@ -2157,7 +2241,7 @@ function renderDrill(where){
   }
   else {
     // Cấp 2: chi tiết giao dịch trong nhóm con (giống ảnh chi tiết Điều Hòa)
-    const list=p.costs.filter(x=>subName(x)===st.sub).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    const list=p.costs.filter(x=>subName(x)===st.sub).sort((a,b)=>dateSortKey(b.date).localeCompare(dateSortKey(a.date)));
     const sum=list.reduce((s,x)=>s+Number(x.amount||0),0);
     body=`<div class="drill-total">${esc(st.sub)}: <b class="num">${fmtFull(sum)}</b> · ${list.length} giao dịch</div>`+
       (list.length? list.map(x=>`
@@ -2174,12 +2258,26 @@ function renderDrill(where){
 }
 
 // Một dòng nhóm có % + thanh màu (kiểu Finance Assist)
-function rowBar(name,amount,pct,col,isSuper,onclick){
+function rowBar(name,amount,pct,col,isSuper,onclick,catId){
+  // Hạn mức cho danh mục cha (nếu có catId)
+  let limHtml='';
+  if(catId){
+    const p=proj();
+    const lim=Number((p.catLimits||{})[catId]||0);
+    if(lim>0){
+      const bs=budgetStatus(lim, amount);
+      limHtml=`<div class="lim-bar" style="margin-top:5px"><div class="lim-fill ${bs.over?'over':(bs.pct>=85?'warn':'')}" style="width:${Math.min(bs.pct,100)}%"></div></div>
+        <div class="lim-txt ${bs.over?'over':''}" style="margin-top:4px">Hạn mức: ${fmtFull(amount)} / ${fmtFull(lim)} · ${bs.pct.toFixed(0)}%${bs.over?(' · ⚠️ vượt '+fmtFull(amount-lim)):(' · còn '+fmtFull(bs.remain))} <button class="mini-edit" onclick="event.stopPropagation();setCatLimit('${catId}')">✏️</button></div>`;
+    } else {
+      limHtml=`<div class="lim-txt" style="color:#94a3b8;margin-top:5px" onclick="event.stopPropagation();setCatLimit('${catId}')">＋ Đặt hạn mức ›</div>`;
+    }
+  }
   return `<div class="item drill-row" ${onclick} style="cursor:pointer">
     <div class="info">
       <div class="t1">${isSuper?'📦 ':''}${esc(name)} <span style="color:var(--sub);font-weight:500;font-size:12px">(${pct.toFixed(0)}%)</span></div>
       <div class="t2" style="height:6px;background:#f1f5f9;border-radius:4px;margin-top:6px;overflow:hidden">
         <div style="width:${Math.max(pct,2).toFixed(0)}%;height:100%;background:${col}"></div></div>
+      ${limHtml}
     </div>
     <div class="amt minus num">${fmtFull(amount)}</div>
     <span class="chev">›</span>
@@ -2691,7 +2789,7 @@ function projDrillBody(p){
       subs.map((s,i)=>rowBar(s.name,s.amount,sum?s.amount/sum*100:0,groupColor(i),false,
         `onclick="event.stopPropagation();pdSub('${p.id}','${jsq(s.name)}')"`)).join('');
   } else {
-    const list=p.costs.filter(x=>subName(x)===st.sub).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    const list=p.costs.filter(x=>subName(x)===st.sub).sort((a,b)=>dateSortKey(b.date).localeCompare(dateSortKey(a.date)));
     const sum=list.reduce((s,x)=>s+Number(x.amount||0),0);
     body=`<div class="drill-total">${esc(st.sub)}: <b class="num">${fmtFull(sum)}</b> · ${list.length} giao dịch</div>`+
       (list.length? list.map(x=>`
@@ -3055,7 +3153,7 @@ function allFinanceTxns(){
   (DB.accounts||[]).forEach(a=>{ (a.txns||[]).forEach(x=>rows.push({date:x.date||'',time:x.time||'',amount:Math.abs(Number(x.amount||0)),
       note:(x.note||'')+' · '+a.name, kind:(Number(x.amount||0)>=0?'Nạp quỹ':'Rút/Chi quỹ'), cls:(Number(x.amount||0)>=0?'in':'cost'), sign:(Number(x.amount||0)>=0?1:-1)})); });
   // sắp xếp theo ngày+giờ GẦN NHẤT trước
-  rows.sort((a,b)=>((b.date||'')+(b.time||'')).localeCompare((a.date||'')+(a.time||'')));
+  rows.sort((a,b)=>dtSortKey(b).localeCompare(dtSortKey(a)));
   return rows;
 }
 function renderTien(){
@@ -3111,7 +3209,7 @@ function renderTien(){
     </div>
     ${accts.length? accts.map(a=>{
       const bal=acctBalance(a);
-      const txns=(a.txns||[]).slice().sort((x,y)=>((y.date||'')+ (y.time||'')).localeCompare((x.date||'')+(x.time||''))).slice(0,6);
+      const txns=(a.txns||[]).slice().sort((x,y)=>dtSortKey(y).localeCompare(dtSortKey(x))).slice(0,6);
       return `
       <div class="acct-block">
         <div class="acct-head">
@@ -3251,7 +3349,7 @@ function acctTxnMore(acctId, txnId){ editAcctTxn(acctId, txnId); }
 // Xem TẤT CẢ giao dịch của 1 tài khoản (có sửa/xóa)
 function allAcctTxns(acctId){
   const a=acctById(acctId); if(!a) return;
-  const txns=(a.txns||[]).slice().sort((x,y)=>((y.date||'')+(y.time||'')).localeCompare((x.date||'')+(x.time||'')));
+  const txns=(a.txns||[]).slice().sort((x,y)=>dtSortKey(y).localeCompare(dtSortKey(x)));
   const rows=txns.map(x=>`<div class="acct-txn" onclick="closeModal();editAcctTxn('${acctId}','${x.id}')" style="cursor:pointer">
       <div class="at-info"><div class="at-note">${esc(x.note||(x.amount>=0?'Nạp tiền':'Chi tiền'))}</div><div class="at-date">${fmtDT(x)}</div></div>
       <div class="at-amt num ${x.amount>=0?'plus':'minus'}">${x.amount>=0?'+':''}${fmtFull(x.amount)}</div>
@@ -5010,7 +5108,7 @@ function dupKey(x){ return [Math.round(Number(x.amount||0)), (x.date||''), normT
 // trả về Set các id là "bản trùng" (giữ lại bản đầu, đánh dấu các bản sau)
 function dupIdSet(list){
   const seen=new Map(), dups=new Set();
-  [...list].sort((a,b)=>((a.date||'')+(a.time||'')).localeCompare((b.date||'')+(b.time||'')))
+  [...list].sort((a,b)=>dtSortKey(a).localeCompare(dtSortKey(b)))
     .forEach(x=>{ const k=dupKey(x); if(seen.has(k)) dups.add(x.id); else seen.set(k,x.id); });
   return dups;
 }
