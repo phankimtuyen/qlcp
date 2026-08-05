@@ -735,6 +735,7 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 <div class="asheet" id="asheet"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
+var APP_VERSION = 'v2026.08.05-5';  // đổi mỗi lần cập nhật để kiểm tra OTA
 /* ==================== MENU 3 CHẤM (KEBAB) dùng chung ==================== */
 function kebab(items){
   const id='kb'+Math.random().toString(36).slice(2,8);
@@ -998,6 +999,17 @@ function migrate(db){
     // nhóm thanh toán (đội thầu phụ / nhà cung cấp / máy) + đợt thanh toán
     if(!Array.isArray(p.payGroups)) p.payGroups=[];
     if(!p.catLimits || typeof p.catLimits!=='object') p.catLimits={};
+    // Sửa chữa ngày cũ bị sai định dạng (dd/mm/yyyy → yyyy-mm-dd) để sắp xếp đúng
+    ['income','costs'].forEach(function(k){
+      (p[k]||[]).forEach(function(x){
+        if(x && x.date){
+          var d=String(x.date);
+          // dd/mm/yyyy hoặc d/m/yyyy → yyyy-mm-dd
+          var m=d.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+          if(m){ x.date=m[3]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[1]).slice(-2); }
+        }
+      });
+    });
     p.costs.forEach(c=>{ if(c.payGroup==null) c.payGroup=''; if(c.dot==null) c.dot=''; });
     // ngân sách từ dự toán
     if(!p.budget || !p.budget.cats) p.budget=blankBudget();
@@ -3733,6 +3745,7 @@ function renderCai(p){
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="openHistory()">🕘 Lịch sử phiên bản (khôi phục sửa/xóa nhầm)</button>
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="renderAuditLog()">📋 Nhật ký thay đổi (${Array.isArray(DB.audit)?DB.audit.length:0} thao tác)</button>
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="checkUpdateNow()">🔄 Kiểm tra cập nhật</button>
+    <div class="hint" style="text-align:center;margin-top:8px;font-size:12px;color:#94a3b8">Phiên bản: <b>${APP_VERSION}</b></div>
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="showStorageInfo()">📊 Xem dung lượng đã dùng</button>
     <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="setupPin()">🔒 ${DB.pin?'Đổi / gỡ mã PIN':'Đặt mã PIN khoá app'}</button>
   </div>
