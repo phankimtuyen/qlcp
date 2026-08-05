@@ -618,6 +618,26 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 .pr-meta{font-size:11px;color:var(--sub);font-weight:500}
 .mini-edit{background:none;border:none;font-size:13px;cursor:pointer;padding:2px 4px;opacity:.7;margin-left:4px}
 .mini-edit:active{opacity:1}
+/* Module phiên bản + cập nhật nổi bật */
+.ver-card{background:var(--hero);color:#fff;border-radius:18px;padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow-hero)}
+.ver-card .vc-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ver-card .vc-app{font-weight:700;font-size:15px}
+.ver-card .vc-ver{font-size:12.5px;opacity:.9;margin-top:2px}
+.ver-card .vc-btn{background:#fff;color:var(--primary);border:none;border-radius:10px;padding:10px 16px;font-weight:700;font-size:14px;cursor:pointer;flex:none;font-family:inherit}
+.ver-card .vc-btn:active{opacity:.85}
+.ver-card .vc-status{font-size:12px;opacity:.9;margin-top:10px;border-top:1px solid rgba(255,255,255,.2);padding-top:8px}
+/* Nhóm cài đặt xổ ra */
+.set-group{background:#fff;border:1px solid var(--line);border-radius:14px;margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow)}
+.set-group>.sg-head{display:flex;align-items:center;gap:11px;padding:15px 16px;cursor:pointer;user-select:none}
+.set-group>.sg-head .sg-ic{font-size:20px;flex:none}
+.set-group>.sg-head .sg-ttl{font-weight:700;font-size:15px;flex:1}
+.set-group>.sg-head .sg-desc{font-size:12px;color:var(--sub);font-weight:400;margin-top:1px}
+.set-group>.sg-head .sg-chev{transition:transform .2s;color:var(--sub);font-size:13px}
+.set-group.open>.sg-head .sg-chev{transform:rotate(90deg)}
+.set-group>.sg-body{display:none;padding:0 14px 14px}
+.set-group.open>.sg-body{display:block}
+.set-group>.sg-body .card{box-shadow:none;border:none;padding:8px 0;margin:0}
+.set-group>.sg-body .card+.card{border-top:1px solid var(--line);margin-top:4px;padding-top:14px}
 /* Overlay phiếu chi — hiển thị trong trang, luôn thoát được (WebView-safe) */
 #pvOverlay{position:fixed;inset:0;z-index:9999;background:#f1f5f9;display:none;flex-direction:column}
 #pvOverlay.show{display:flex}
@@ -735,7 +755,7 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 <div class="asheet" id="asheet"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-var APP_VERSION = 'v2026.08.05-5';  // đổi mỗi lần cập nhật để kiểm tra OTA
+var APP_VERSION = 'v2026.08.05-7';  // đổi mỗi lần cập nhật để kiểm tra OTA
 /* ==================== MENU 3 CHẤM (KEBAB) dùng chung ==================== */
 function kebab(items){
   const id='kb'+Math.random().toString(36).slice(2,8);
@@ -1358,7 +1378,13 @@ const fmtQty = n => (Number(n)||0).toLocaleString('vi-VN',{minimumFractionDigits
 const nowTime = () => { const d=new Date(); const p=x=>String(x).padStart(2,'0');
   return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); };
 // ngày + giờ:phút:giây (nếu có)
-const fmtDT = x => (fmtDate(x.date)||'') + (x.time?(' '+x.time):'');
+const WEEKDAYS_VN = ['Chủ nhật','Thứ 2','Thứ 3','Thứ 4','Thứ 5','Thứ 6','Thứ 7'];
+function weekdayVN(dateStr){
+  if(!dateStr) return '';
+  var d=new Date(dateStr+'T00:00:00'); if(isNaN(d)) return '';
+  return WEEKDAYS_VN[d.getDay()]||'';
+}
+const fmtDT = x => { const wd=weekdayVN(x.date); return (wd?wd+', ':'')+(fmtDate(x.date)||'') + (x.time?(' '+x.time):''); };
 // Chỉ lấy phần nguyên, bỏ số sau dấu thập phân
 const parseNum = s => {
   let t=String(s||'').trim();
@@ -3612,7 +3638,24 @@ function renderBao(p){
   renderDrill('Bao');
 }
 
-/* ---------- CÀI ĐẶT ---------- */
+/* ---------- CÀI ĐẶT (thiết kế lại: nhóm xổ ra) ---------- */
+var SET_OPEN = { thueDuAn:false };  // nhóm nào đang mở
+function toggleSetGroup(key, el){
+  const g=el.closest('.set-group'); if(!g) return;
+  g.classList.toggle('open');
+  SET_OPEN[key]=g.classList.contains('open');
+}
+function setGroup(key, icon, title, desc, inner){
+  const open=SET_OPEN[key];
+  return `<div class="set-group ${open?'open':''}">
+    <div class="sg-head" onclick="toggleSetGroup('${key}',this)">
+      <span class="sg-ic">${icon}</span>
+      <div class="sg-ttl">${title}<div class="sg-desc">${desc}</div></div>
+      <span class="sg-chev">▶</span>
+    </div>
+    <div class="sg-body">${inner}</div>
+  </div>`;
+}
 function renderCai(p){
   const order=tabOrder();
   const tabRows=order.map((k,i)=>{
@@ -3624,139 +3667,115 @@ function renderCai(p){
       <button class="row-act" ${i===order.length-1?'disabled style="opacity:.35"':''} onclick="moveTab('${k}',1)">▼</button>
     </div>`;
   }).join('');
-  document.getElementById('pageCai').innerHTML = `
-  ${projectSelector()}
-  <div class="card">
-    <h2>↕️ Sắp xếp thanh tab</h2>
-    <div class="hint" style="margin-bottom:8px">Đổi thứ tự các tab ở thanh dưới cùng theo ý bạn. Dùng ▲ ▼ để di chuyển.</div>
-    <div class="tab-order">${tabRows}</div>
-  </div>
-  <div class="card">
-    <h2>🏗️ Nhóm địa điểm dự án</h2>
-    <label>Doanh thu hợp đồng / giá trị CĐT (đ)</label>
-    <input type="text" inputmode="numeric" value="${proj().contractAmount!=null?proj().contractAmount:(proj().budget&&proj().budget.revenue!=null?proj().budget.revenue:'')}" placeholder="VD: 2793791470"
-      onchange="proj().contractAmount=this.value.trim()===''?null:parseNum(this.value);save();renderAll()">
-    <div class="hint">Dùng để tính <b>Còn lại chưa TT</b> = Hợp đồng − Đã thanh toán (gồm cả tạm ứng). Nếu đã nhập dự toán thì lấy từ dự toán.</div>
-    <label>Nhóm theo địa điểm (dùng ở tab Dự án)</label>
-    <select onchange="proj().location=this.value;save();renderAll()">
-      <option value="" ${!p.location?'selected':''}>— Không nhóm —</option>
-      ${LOCATION_GROUPS.map(g=>`<option value="${g.key}" ${p.location===g.key?'selected':''}>${g.name}</option>`).join('')}
-    </select>
-    ${(p.budget&&p.budget.title&&(p.budget.title.hangMuc||p.budget.title.diaDiem))?`<div class="hint" style="margin-top:6px">Từ dự toán: ${esc([p.budget.title.hangMuc,p.budget.title.diaDiem].filter(Boolean).join(' — '))}</div>`:''}
-    <div class="loc-manage">
-      <div class="lm-head">Quản lý danh sách địa điểm</div>
-      ${LOCATION_GROUPS.map(g=>`<div class="lm-row"><span class="lm-pin">📍</span><span class="lm-name">${esc(g.name)}</span><span class="lm-count">${DB.projects.filter(pp=>pp.location===g.key).length} dự án</span><button type="button" class="lm-del" onclick="removeLocation('${g.key}')" aria-label="Xóa địa điểm">🗑️</button></div>`).join('')}
-      <button type="button" class="btn sec sm" style="width:100%;margin-top:8px" onclick="addLocation()">＋ Thêm địa điểm</button>
-    </div>
-  </div>
-  <div class="card">
-    <h2>💵 Thuế cho dự án này</h2>
+
+  // ===== Nội dung từng nhóm =====
+  const gTax = `<div class="card">
     <label>Cách tính thuế</label>
     <select id="taxModeSel" onchange="proj().taxMode=this.value;save();renderCai(proj());renderAll()">
-      <option value="cit" ${p.taxMode==='cit'?'selected':''}>Thuế TNDN: (Giá trị hợp đồng − Chi phí có VAT) ÷ VAT × hệ số</option>
+      <option value="cit" ${p.taxMode==='cit'?'selected':''}>Thuế TNDN: (Giá trị HĐ − Chi phí VAT) ÷ VAT × hệ số</option>
       <option value="rate" ${p.taxMode==='rate'?'selected':''}>Tỷ lệ × Giá trị hợp đồng</option>
       <option value="manual" ${p.taxMode==='manual'?'selected':''}>Nhập thủ công</option>
     </select>
     ${p.taxMode==='cit'?`
     <div class="row" style="margin-top:8px">
-      <div>
-        <label>Hệ số VAT (chia)</label>
-        <input type="number" step="0.01" value="${p.vatDivisor}" onchange="proj().vatDivisor=parseFloat(this.value)||1.08;save();renderCai(proj());renderAll()">
-      </div>
-      <div>
-        <label>Hệ số thuế TNDN</label>
-        <input type="number" step="0.01" value="${p.citRate}" onchange="proj().citRate=parseFloat(this.value)||0;save();renderCai(proj());renderAll()">
-      </div>
+      <div><label>Hệ số VAT (chia)</label>
+        <input type="number" step="0.01" value="${p.vatDivisor}" onchange="proj().vatDivisor=parseFloat(this.value)||1.08;save();renderCai(proj());renderAll()"></div>
+      <div><label>Hệ số thuế TNDN</label>
+        <input type="number" step="0.01" value="${p.citRate}" onchange="proj().citRate=parseFloat(this.value)||0;save();renderCai(proj());renderAll()"></div>
     </div>
-    <div class="hint" style="margin-top:6px;line-height:1.6">
-      Thuế = (Giá trị hợp đồng − Chi phí có VAT) ÷ ${p.vatDivisor} × ${p.citRate}<br>
-      = (${fmtFull(totals(p).taxBase)} − ${fmtFull(totals(p).costVat)}) ÷ ${p.vatDivisor} × ${p.citRate}<br>
-      <b>= ${fmtFull(totals(p).tax)}</b> · Cơ sở tính: ${totals(p).contract!=null?'giá trị hợp đồng':'tổng đã thu (chưa nhập HĐ)'} ${fmtFull(totals(p).taxBase)}
-    </div>`:''}
-    ${p.taxMode==='rate'?`
-    <label>Tỷ lệ thuế (mặc định 0.2)</label>
+    <div class="hint" style="margin-top:6px;line-height:1.6">Thuế = (${fmtFull(totals(p).taxBase)} − ${fmtFull(totals(p).costVat)}) ÷ ${p.vatDivisor} × ${p.citRate} = <b>${fmtFull(totals(p).tax)}</b></div>`:''}
+    ${p.taxMode==='rate'?`<label>Tỷ lệ thuế (mặc định 0.2)</label>
     <input type="number" step="0.01" value="${p.taxRate}" onchange="proj().taxRate=parseFloat(this.value)||0;save();renderAll()">
-    <div class="hint" style="margin-top:6px">Thuế = ${p.taxRate} × Giá trị hợp đồng = ${p.taxRate} × ${fmtFull(totals(p).taxBase)} = <b>${fmtFull(totals(p).tax)}</b></div>`:''}
-    ${p.taxMode==='manual'?`
-    <label>Số thuế (nhập thủ công)</label>
-    <input type="text" inputmode="numeric" value="${p.taxManual!=null?p.taxManual:''}" placeholder="VD: 500000000"
-      onchange="proj().taxManual=this.value.trim()===''?null:parseNum(this.value);save();renderAll()">
+    <div class="hint" style="margin-top:6px">Thuế = ${p.taxRate} × ${fmtFull(totals(p).taxBase)} = <b>${fmtFull(totals(p).tax)}</b></div>`:''}
+    ${p.taxMode==='manual'?`<label>Số thuế (nhập thủ công)</label>
+    <input type="text" inputmode="numeric" value="${p.taxManual!=null?p.taxManual:''}" placeholder="VD: 500000000" onchange="proj().taxManual=this.value.trim()===''?null:parseNum(this.value);save();renderAll()">
     <div class="hint" style="margin-top:6px">Thuế = <b>${fmtFull(totals(p).tax)}</b></div>`:''}
+  </div>`;
+
+  const gProject = `<div class="card">
+    <label>Doanh thu hợp đồng / giá trị CĐT (đ)</label>
+    <input type="text" inputmode="numeric" value="${proj().contractAmount!=null?proj().contractAmount:(proj().budget&&proj().budget.revenue!=null?proj().budget.revenue:'')}" placeholder="VD: 2793791470"
+      onchange="proj().contractAmount=this.value.trim()===''?null:parseNum(this.value);save();renderAll()">
+    <div class="hint">Dùng để tính <b>Còn lại chưa TT</b> = Hợp đồng − Đã thanh toán.</div>
+    <label style="margin-top:10px">Nhóm theo địa điểm</label>
+    <select onchange="proj().location=this.value;save();renderAll()">
+      <option value="" ${!p.location?'selected':''}>— Không nhóm —</option>
+      ${LOCATION_GROUPS.map(g=>`<option value="${g.key}" ${p.location===g.key?'selected':''}>${g.name}</option>`).join('')}
+    </select>
+    <div class="loc-manage">
+      <div class="lm-head">Quản lý danh sách địa điểm</div>
+      ${LOCATION_GROUPS.map(g=>`<div class="lm-row"><span class="lm-pin">📍</span><span class="lm-name">${esc(g.name)}</span><span class="lm-count">${DB.projects.filter(pp=>pp.location===g.key).length} dự án</span><button type="button" class="lm-del" onclick="removeLocation('${g.key}')">🗑️</button></div>`).join('')}
+      <button type="button" class="btn sec sm" style="width:100%;margin-top:8px" onclick="addLocation()">＋ Thêm địa điểm</button>
+    </div>
   </div>
-  ${superGroupCard(p)}
-  <div class="card">
-    <h2>📐 Nhập Dự toán (đặt ngân sách)</h2>
+  <div class="card"><h2 style="font-size:14px">↕️ Sắp xếp thanh tab</h2>
+    <div class="tab-order">${tabRows}</div>
+  </div>`;
+
+  const gImport = `<div class="card">
+    <h2 style="font-size:14px">📐 Nhập Dự toán (đặt ngân sách)</h2>
     <div class="dz" onclick="document.getElementById('fileBudget').click()">
-      <div class="dz-ic">📐</div>
-      <div class="dz-t">Chạm để chọn file dự toán</div>
-      <div class="hint">.xls / .xlsx — tự trích Doanh thu, Vật tư, Nhân công, Ca máy làm hạn mức</div>
+      <div class="dz-ic">📐</div><div class="dz-t">Chạm để chọn file dự toán</div>
+      <div class="hint">.xls / .xlsx — tự trích Doanh thu, Vật tư, Nhân công, Ca máy</div>
     </div>
     <input type="file" id="fileBudget" accept=".xls,.xlsx" style="display:none" onchange="handleBudgetFile(this.files[0]); this.value=''">
-    <div class="hint">Nhận diện linh hoạt nhiều mẫu dự toán: bảng <b>Tổng hợp kinh phí</b> (VL/NC/MTC/Chi phí chung), bảng <b>Dự thầu</b> (doanh thu &amp; tách hạn mức từng công việc theo Vật liệu / Nhân công / Máy).</div>
-    ${hasBudget(p)?`<button class="btn sec sm" style="margin-top:10px" onclick="openBudgetView()">Xem / sửa ngân sách hiện tại</button>`:''}
+    ${hasBudget(p)?`<button class="btn sec sm" style="margin-top:10px" onclick="openBudgetView()">Xem / sửa ngân sách</button>`:''}
   </div>
   <div class="card">
-    <h2>📥 Nhập giao dịch từ Excel / CSV</h2>
+    <h2 style="font-size:14px">📥 Nhập giao dịch (Finance Assist)</h2>
     <div class="dz" onclick="document.getElementById('fileIn').click()">
-      <div class="dz-ic">📥</div>
-      <div class="dz-t">Chạm để chọn file .xlsx / .csv</div>
-      <div class="hint">Tương thích export từ Finance Assist</div>
+      <div class="dz-ic">📥</div><div class="dz-t">Chạm để chọn file .xlsx / .csv</div>
+      <div class="hint">Tự nhận diện thu/chi, gộp bút toán kép, quét trùng</div>
     </div>
     <input type="file" id="fileIn" accept=".xlsx,.csv" style="display:none" onchange="handleFile(this.files[0]); this.value=''">
-    <div class="hint">App tự nhận diện Doanh thu (số dương) và Chi phí (số âm), gộp các bút toán kép trùng lặp, phân loại theo Danh Mục.</div>
   </div>
+  <div class="card">
+    <h2 style="font-size:14px">🏦 Đồng bộ ngân hàng (Casso)</h2>
+    <input type="text" id="cassoKey" value="${esc(DB.cassoApiKey||'')}" placeholder="Apikey từ developer.casso.vn" onchange="DB.cassoApiKey=this.value.trim();save()">
+    <button class="btn sm" style="margin-top:8px;width:100%" onclick="cassoFetch()">Đồng bộ giao dịch</button>
+  </div>`;
 
-  <div class="card">
-    <h2>🏦 Đồng bộ ngân hàng (Casso)</h2>
-    <label>Casso API Key</label>
-    <input type="text" id="cassoKey" value="${esc(DB.cassoApiKey||'')}" placeholder="Apikey từ developer.casso.vn"
-      onchange="DB.cassoApiKey=this.value.trim();save()">
-    <div class="row" style="margin-top:10px">
-      <button class="btn" onclick="cassoFetch()">Đồng bộ giao dịch</button>
-    </div>
-    <div class="hint" style="margin-top:8px">
-      1. Đăng ký & liên kết ngân hàng tại <b>casso.vn</b><br>
-      2. Vào developer.casso.vn lấy API Key<br>
-      3. Dán key vào ô trên → bấm Đồng bộ<br>
-      <span style="color:#b45309">Lưu ý: trình duyệt có thể chặn CORS. Nếu lỗi, dùng CORS proxy hoặc extension tạm thời.</span>
-    </div>
-  </div>
-  <div class="card">
-    <h2>☁️ Sao lưu Google Drive</h2>
-    <div class="hint" style="line-height:1.7">Đồng bộ Google Drive tự động chạy trong <b>app đã cài (APK)</b> — khối "☁️ Google Drive (tự động)" ở đầu trang này. Khi mở bằng trình duyệt, hãy dùng nút <b>Sao lưu ra ngoài máy</b> bên dưới để lưu file .json vào Drive/Zalo/Email.</div>
-  </div>
-  <div class="card">
-    <h2>📤 Xuất báo cáo Excel</h2>
-    <button class="btn" onclick="exportReport()">Xuất báo cáo (.xlsx)</button>
-    <div class="hint">Gồm nhiều sheet: Tổng quan, Ngân sách vs Thực tế (cảnh báo vượt), Chi tiết giao dịch theo nhóm, và Đã thanh toán.</div>
-  </div>
-  <div class="card">
-    <h2>💾 Sao lưu &amp; khôi phục</h2>
-    <div class="hint" style="margin-bottom:10px">⚠️ <b>Mất/hỏng điện thoại = mất hết dữ liệu trên máy.</b> Cách chống chắc chắn nhất: <b>sao lưu ra ngoài máy</b> (Zalo, Gmail, Google Drive…) định kỳ.</div>
+  const gBackup = `<div class="card">
+    <div class="hint" style="margin-bottom:10px">⚠️ <b>Mất/hỏng điện thoại = mất dữ liệu.</b> Sao lưu ra ngoài máy định kỳ để an toàn.</div>
     <button class="btn" style="width:100%;background:linear-gradient(135deg,#2563eb,#1d4ed8)" onclick="backupOutOfDevice()">🛟 Sao lưu ra ngoài máy (Zalo / Email / Drive)</button>
-    <div class="hint" style="margin-top:6px" id="lastBackupInfo">${DB.lastBackupAt?('Lần sao lưu ngoài gần nhất: '+new Date(DB.lastBackupAt).toLocaleString('vi-VN')):'Chưa từng sao lưu ra ngoài máy.'}</div>
+    <div class="hint" style="margin-top:6px" id="lastBackupInfo">${DB.lastBackupAt?('Lần gần nhất: '+new Date(DB.lastBackupAt).toLocaleString('vi-VN')):'Chưa từng sao lưu ra ngoài máy.'}</div>
     <div class="row" style="margin-top:10px">
       <button class="btn sec sm" onclick="exportJson()">⬇️ Lưu file vào máy</button>
       <button class="btn sec sm" onclick="document.getElementById('fileRestore').click()">⬆️ Khôi phục từ file</button>
     </div>
     <input type="file" id="fileRestore" accept=".json,application/json" style="display:none" onchange="restoreJson(this.files[0]); this.value=''">
-    <button class="btn ghost sm" style="margin-top:10px;width:100%" onclick="cloneCurrentProject()">📑 Nhân bản dự án hiện tại</button>
-    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="scanDuplicates()">🔍 Quét giao dịch trùng lặp</button>
-    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="openHistory()">🕘 Lịch sử phiên bản (khôi phục sửa/xóa nhầm)</button>
-    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="renderAuditLog()">📋 Nhật ký thay đổi (${Array.isArray(DB.audit)?DB.audit.length:0} thao tác)</button>
-    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="checkUpdateNow()">🔄 Kiểm tra cập nhật</button>
-    <div class="hint" style="text-align:center;margin-top:8px;font-size:12px;color:#94a3b8">Phiên bản: <b>${APP_VERSION}</b></div>
-    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="showStorageInfo()">📊 Xem dung lượng đã dùng</button>
-    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="setupPin()">🔒 ${DB.pin?'Đổi / gỡ mã PIN':'Đặt mã PIN khoá app'}</button>
   </div>
   <div class="card">
-    <h2>🧪 Kiểm tra &amp; dữ liệu</h2>
-    <button class="btn sec sm" onclick="runAutoSyncTest()">Chạy tự kiểm tra đồng bộ</button>
-    <div class="row" style="margin-top:10px">
-      <button class="btn ghost sm" onclick="renameProject()">Đổi tên dự án</button>
-    </div>
+    <button class="btn ghost sm" style="width:100%" onclick="exportReport()">📤 Xuất báo cáo Excel (.xlsx)</button>
+    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="cloneCurrentProject()">📑 Nhân bản dự án hiện tại</button>
+    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="scanDuplicates()">🔍 Quét giao dịch trùng lặp</button>
+    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="openHistory()">🕘 Khôi phục sửa/xóa nhầm</button>
+    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="renderAuditLog()">📋 Nhật ký thay đổi (${Array.isArray(DB.audit)?DB.audit.length:0})</button>
+  </div>`;
+
+  const gSystem = `<div class="card">
+    <button class="btn ghost sm" style="width:100%" onclick="showStorageInfo()">📊 Xem dung lượng đã dùng</button>
+    <button class="btn ghost sm" style="margin-top:8px;width:100%" onclick="setupPin()">🔒 ${DB.pin?'Đổi / gỡ mã PIN':'Đặt mã PIN khoá app'}</button>
+    <button class="btn sec sm" style="margin-top:8px;width:100%" onclick="runAutoSyncTest()">🧪 Chạy tự kiểm tra đồng bộ</button>
     <div class="hint" id="testOut"></div>
   </div>`;
+
+  document.getElementById('pageCai').innerHTML = `
+  ${projectSelector()}
+  <div class="ver-card">
+    <div class="vc-top">
+      <div><div class="vc-app">📊 Quản Lý Chi Phí</div><div class="vc-ver">Phiên bản ${APP_VERSION}</div></div>
+      <button class="vc-btn" onclick="checkUpdateNow()">🔄 Cập nhật</button>
+    </div>
+    <div class="vc-status" id="verStatus">Chạm "Cập nhật" để kiểm tra bản mới trên mạng.</div>
+  </div>
+  ${setGroup('thueDuAn','💵','Thuế & dự án','Cách tính thuế, hợp đồng, địa điểm, thứ tự tab', gProject+gTax)}
+  ${setGroup('nhomHM','📦','Nhóm & hạn mức','Nhóm cha, hạn mức chi phí', superGroupCard(p))}
+  ${setGroup('nhapLieu','📥','Nhập dữ liệu','Dự toán, Finance Assist, ngân hàng', gImport)}
+  ${setGroup('drive','☁️','Google Drive','Sao lưu tự động (khối xanh đầu trang khi ở APK)', `<div class="card"><div class="hint" style="line-height:1.7">Đồng bộ Google Drive tự động nằm ở khối "☁️ Google Drive (tự động)" đầu trang này khi chạy trong app đã cài.</div></div>`)}
+  ${setGroup('saoluu','💾','Sao lưu & báo cáo','Sao lưu ra ngoài, xuất Excel, khôi phục', gBackup)}
+  ${setGroup('hethong','⚙️','Hệ thống','Dung lượng, mã PIN, tự kiểm tra', gSystem)}
+  `;
   renderSuperGroupBody(p);
 }
 
@@ -7291,10 +7310,13 @@ window.__onDriveResult = window.__onDriveResult || function(){};
 })();
 // Nút bấm kiểm tra cập nhật
 function checkUpdateNow(){
+  var vs=document.getElementById('verStatus');
   if(window.AndroidDrive && typeof window.AndroidDrive.checkUpdate==='function'){
+    if(vs) vs.textContent='⏳ Đang kiểm tra bản mới trên mạng…';
     toast('Đang kiểm tra cập nhật…');
     window.AndroidDrive.checkUpdate();
   } else {
+    if(vs) vs.textContent='ℹ️ Cập nhật qua mạng chỉ hoạt động trong app đã cài (APK).';
     toast('Chức năng này chỉ có trong app đã cài (APK)');
   }
 }
