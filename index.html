@@ -616,6 +616,8 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 .pr-lab{font-size:12px;color:var(--sub);font-weight:600;display:flex;align-items:center;gap:6px}
 .pr-val{font-size:20px;font-weight:800;letter-spacing:-.3px;margin:5px 0 3px;line-height:1.1}
 .pr-meta{font-size:11px;color:var(--sub);font-weight:500}
+.mini-edit{background:none;border:none;font-size:13px;cursor:pointer;padding:2px 4px;opacity:.7;margin-left:4px}
+.mini-edit:active{opacity:1}
 /* Overlay phiếu chi — hiển thị trong trang, luôn thoát được (WebView-safe) */
 #pvOverlay{position:fixed;inset:0;z-index:9999;background:#f1f5f9;display:none;flex-direction:column}
 #pvOverlay.show{display:flex}
@@ -995,6 +997,7 @@ function migrate(db){
     if(!Array.isArray(p.superGroups)) p.superGroups=[];
     // nhóm thanh toán (đội thầu phụ / nhà cung cấp / máy) + đợt thanh toán
     if(!Array.isArray(p.payGroups)) p.payGroups=[];
+    if(!p.catLimits || typeof p.catLimits!=='object') p.catLimits={};
     p.costs.forEach(c=>{ if(c.payGroup==null) c.payGroup=''; if(c.dot==null) c.dot=''; });
     // ngân sách từ dự toán
     if(!p.budget || !p.budget.cats) p.budget=blankBudget();
@@ -1403,6 +1406,20 @@ async function downloadBlob(blob, filename){
   return false;
 }
 function catName(id){ return (COST_CATS.find(c=>c.id===id)||{name:'Khác'}).name; }
+// Đặt / sửa hạn mức cho 1 danh mục chi phí (nhóm cha)
+function setCatLimit(catId){
+  const p=proj(); if(!p) return;
+  if(!p.catLimits) p.catLimits={};
+  const cur=p.catLimits[catId]||'';
+  const nm=catName(catId);
+  askText('Hạn mức cho "'+nm+'"', 'Nhập số tiền (để trống = bỏ hạn mức)', cur?String(cur):'', function(val){
+    const n=Math.trunc(Number(String(val).replace(/[^\d]/g,''))||0);
+    if(!p.catLimits) p.catLimits={};
+    if(n>0) p.catLimits[catId]=n; else delete p.catLimits[catId];
+    save(); renderAll();
+    toast(n>0?('Đã đặt hạn mức '+nm+': '+fmtFull(n)):('Đã bỏ hạn mức '+nm));
+  });
+}
 function catCls(id){ return (COST_CATS.find(c=>c.id===id)||{cls:'c-kh'}).cls; }
 
 /* ==================== TOTALS ==================== */
@@ -1916,12 +1933,19 @@ function costGroupCard(p,t){
     const subs=Object.keys(subMap).map(name=>({name, txns:subMap[name],
       sum:subMap[name].reduce((s,x)=>s+Number(x.amount||0),0)})).sort((a,b)=>b.sum-a.sum);
     const col=groupColor(ci);
+    const catLim=Number((p.catLimits||{})[c.id]||0);
+    const cbs=budgetStatus(catLim, catSum);
+    const limRow = catLim>0
+      ? `<div class="lim-bar" style="margin-top:6px"><div class="lim-fill ${cbs.over?'over':(cbs.pct>=85?'warn':'')}" style="width:${Math.min(cbs.pct,100)}%"></div></div>
+         <div class="lim-txt ${cbs.over?'over':''}">Hạn mức: ${fmtFull(catSum)} / ${fmtFull(catLim)} · ${cbs.pct.toFixed(0)}%${cbs.over?(' · ⚠️ vượt '+fmtFull(catSum-catLim)):(' · còn '+fmtFull(cbs.remain))}</div>`
+      : `<div class="lim-txt" style="color:#94a3b8;margin-top:4px" onclick="event.stopPropagation();setCatLimit('${c.id}')">＋ Đặt hạn mức nhóm này ›</div>`;
     return `<div class="grp ${isOpen(ck)?'open':''}">
       <div class="ghead" onclick="toggleGrp('${ck}',this)">
         <span class="gchev">▶</span>
         <div class="ginfo">
-          <div class="gname"><span class="pill ${c.cls}">${c.name}</span> <span style="color:var(--sub);font-weight:500;font-size:12px">(${catPct.toFixed(1)}%)</span></div>
+          <div class="gname"><span class="pill ${c.cls}">${c.name}</span> <span style="color:var(--sub);font-weight:500;font-size:12px">(${catPct.toFixed(1)}%)</span>${catLim>0?`<button class="mini-edit" onclick="event.stopPropagation();setCatLimit('${c.id}')" title="Sửa hạn mức">✏️</button>`:''}</div>
           <div class="gbar"><i style="width:${Math.max(catPct,2).toFixed(1)}%;background:${col}"></i></div>
+          ${limRow}
         </div>
         <div class="amt minus num">${fmtFull(catSum)}</div>
       </div>
