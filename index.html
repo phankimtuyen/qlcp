@@ -3421,6 +3421,7 @@ function inPeriod(dateStr){
   if(REPORT_PERIOD==='all') return true;
   const d=(dateStr||''); if(!d) return false;
   const y=d.slice(0,4), m=d.slice(5,7);
+  if(/^\d{4}-W\d{2}$/.test(REPORT_PERIOD)) return isoWeekKey(d)===REPORT_PERIOD;  // lọc theo tuần
   if(/^\d{4}-Q[1-4]$/.test(REPORT_PERIOD)){
     const py=REPORT_PERIOD.slice(0,4), q=+REPORT_PERIOD.slice(6);
     const mn=+m; const qq=Math.ceil(mn/3);
@@ -3449,7 +3450,38 @@ function periodOptions(p){
     [1,2,3,4].forEach(q=>{ if(months.some(m=>m.slice(0,4)===y && Math.ceil(+m.slice(5,7)/3)===q)){ const v=y+'-Q'+q; opts+=`<option value="${v}" ${REPORT_PERIOD===v?'selected':''}>Quý ${q}/${y}</option>`; } });
     months.filter(m=>m.slice(0,4)===y).forEach(m=>{ opts+=`<option value="${m}" ${REPORT_PERIOD===m?'selected':''}>Tháng ${m.slice(5,7)}/${y}</option>`; });
   });
+  // Các tuần gần đây (8 tuần) — để kiểm soát theo tuần
+  var weekSet=new Set();
+  [...p.income,...p.costs].forEach(x=>{ if((x.date||'').length>=10){ weekSet.add(isoWeekKey(x.date)); } });
+  var weeks=[...weekSet].sort().reverse().slice(0,8);
+  weeks.forEach(w=>{ opts+=`<option value="${w}" ${REPORT_PERIOD===w?'selected':''}>${weekLabel(w)}</option>`; });
   return opts;
+}
+// Khóa tuần ISO kiểu "2026-W32"
+function isoWeekKey(dateStr){
+  var d=new Date(dateStr+'T00:00:00'); if(isNaN(d)) return '';
+  var t=new Date(d.getTime()); t.setDate(t.getDate()+4-(t.getDay()||7));
+  var yStart=new Date(t.getFullYear(),0,1);
+  var wk=Math.ceil((((t-yStart)/86400000)+1)/7);
+  return t.getFullYear()+'-W'+('0'+wk).slice(-2);
+}
+function weekLabel(wkey){
+  var m=wkey.match(/^(\d{4})-W(\d{2})$/); if(!m) return wkey;
+  var r=weekRange(wkey);
+  return 'Tuần '+(+m[2])+'/'+m[1]+' ('+fmtDate(r.from)+'–'+fmtDate(r.to)+')';
+}
+// Khoảng ngày đầu–cuối của 1 tuần ISO
+function weekRange(wkey){
+  var m=wkey.match(/^(\d{4})-W(\d{2})$/); if(!m) return {from:'',to:''};
+  var y=+m[1], w=+m[2];
+  var simple=new Date(y,0,1+(w-1)*7);
+  var dow=simple.getDay();
+  var monday=new Date(simple);
+  if(dow<=4) monday.setDate(simple.getDate()-simple.getDay()+1);
+  else monday.setDate(simple.getDate()+8-simple.getDay());
+  var sunday=new Date(monday); sunday.setDate(monday.getDate()+6);
+  var fmt=dt=>dt.getFullYear()+'-'+('0'+(dt.getMonth()+1)).slice(-2)+'-'+('0'+dt.getDate()).slice(-2);
+  return {from:fmt(monday), to:fmt(sunday)};
 }
 function renderBao(p){
   const t = totals(p);
@@ -6370,7 +6402,7 @@ function classifyFinanceAssist(records){
   const income=[], costs=[];
   kept.forEach(r=>{
     const ts=String(r.time);
-    const date=ts.slice(0,10)||today();
+    const date=normFaDate(ts);
     const tm=(ts.match(/\d{2}:\d{2}(:\d{2})?/)||[''])[0]; // giờ:phút(:giây)
     if(r.amount>0){
       income.push({id:'i'+Math.random().toString(36).slice(2),type:/tạm ứng|tam ung/i.test(r.note)?'adv':'in',
@@ -6385,6 +6417,21 @@ function classifyFinanceAssist(records){
     }
   });
   return {income,costs,dropped:rows.length-kept.length};
+}
+// Chuẩn hóa ngày về yyyy-mm-dd để sắp xếp đúng thứ tự thời gian
+// Nhận: "2026-08-05...", "05/08/2026...", "5/8/2026", "08/05/2026 14:30"...
+function normFaDate(ts){
+  ts=String(ts||'').trim();
+  // Đã là yyyy-mm-dd
+  var m=ts.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return m[1]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[3]).slice(-2);
+  // dd/mm/yyyy hoặc d/m/yyyy (định dạng Việt Nam phổ biến)
+  m=ts.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+  if(m){ var d=m[1],mo=m[2],y=m[3];
+    // nếu số đầu >12 chắc chắn là ngày (dd/mm); mặc định coi là dd/mm (VN)
+    return y+'-'+('0'+mo).slice(-2)+'-'+('0'+d).slice(-2);
+  }
+  return today();
 }
 
 
@@ -6506,8 +6553,22 @@ function commitImport(){
   }
   drillReset();
   save(); closeModal(); renderAll(); nav('Tong');
-  toast('Đã nhập '+(PENDING.income.length+PENDING.costs.length)+' giao dịch'+sgMsg);
+  var importedN = PENDING.income.length+PENDING.costs.length;
+  toast('Đã nhập '+importedN+' giao dịch'+sgMsg);
   PENDING=null;
+  // Tự động quét trùng lặp ngay sau khi import để bạn khỏi phải tự nhớ kiểm tra
+  setTimeout(function(){
+    try{
+      var dn = (typeof dupCount==='function') ? dupCount(proj()) : 0;
+      if(dn>0){
+        if(confirm('✅ Đã nhập '+importedN+' giao dịch.\n\n⚠️ Phát hiện '+dn+' giao dịch CÓ THỂ TRÙNG với dữ liệu đã có (cùng số tiền + ngày + ghi chú).\n\nXem & xử lý ngay?')){
+          scanDuplicates();
+        }
+      } else {
+        toast('✓ Không có giao dịch trùng — tổng số tiền chính xác');
+      }
+    }catch(e){}
+  }, 700);
 }
 
 
