@@ -618,6 +618,14 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 .pr-meta{font-size:11px;color:var(--sub);font-weight:500}
 .mini-edit{background:none;border:none;font-size:13px;cursor:pointer;padding:2px 4px;opacity:.7;margin-left:4px}
 .mini-edit:active{opacity:1}
+/* Dòng hạn mức gọn: đã chi / hạn mức + badge trạng thái */
+.lim-line{display:flex;align-items:center;gap:5px;margin-top:5px;font-size:12.5px;font-weight:700;color:var(--sub);flex-wrap:wrap}
+.lim-line .lim-sep{color:#cbd5e1;font-weight:400}
+.lim-line.over{color:var(--cost)}
+.lim-badge{font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px;margin-left:2px}
+.lim-badge.ok{background:#ecfdf5;color:#059669}
+.lim-badge.warn{background:#fffbeb;color:#d97706}
+.lim-badge.over{background:#fef2f2;color:#dc2626}
 /* Module phiên bản + cập nhật nổi bật */
 .ver-card{background:var(--hero);color:#fff;border-radius:18px;padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow-hero)}
 .ver-card .vc-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
@@ -755,7 +763,7 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 <div class="asheet" id="asheet"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-var APP_VERSION = 'v2026.08.05-11';  // đổi mỗi lần cập nhật để kiểm tra OTA
+var APP_VERSION = 'v2026.08.05-12';  // đổi mỗi lần cập nhật để kiểm tra OTA
 /* ==================== MENU 3 CHẤM (KEBAB) dùng chung ==================== */
 function kebab(items){
   const id='kb'+Math.random().toString(36).slice(2,8);
@@ -2259,29 +2267,49 @@ function renderDrill(where){
 
 // Một dòng nhóm có % + thanh màu (kiểu Finance Assist)
 function rowBar(name,amount,pct,col,isSuper,onclick,catId){
-  // Hạn mức cho danh mục cha (nếu có catId)
-  let limHtml='';
+  let barHtml, limHtml='', kb='';
   if(catId){
     const p=proj();
     const lim=Number((p.catLimits||{})[catId]||0);
+    // Menu 3 chấm cho danh mục: đặt/sửa/bỏ hạn mức
+    kb = kebab(lim>0 ? [
+      {label:'Sửa hạn mức', icon:'✏️', fn:`setCatLimit('${catId}')`},
+      {label:'Bỏ hạn mức', icon:'🗑️', danger:true, fn:`clearCatLimit('${catId}')`}
+    ] : [
+      {label:'Đặt hạn mức', icon:'🎯', fn:`setCatLimit('${catId}')`}
+    ]);
     if(lim>0){
       const bs=budgetStatus(lim, amount);
-      limHtml=`<div class="lim-bar" style="margin-top:5px"><div class="lim-fill ${bs.over?'over':(bs.pct>=85?'warn':'')}" style="width:${Math.min(bs.pct,100)}%"></div></div>
-        <div class="lim-txt ${bs.over?'over':''}" style="margin-top:4px">Hạn mức: ${fmtFull(amount)} / ${fmtFull(lim)} · ${bs.pct.toFixed(0)}%${bs.over?(' · ⚠️ vượt '+fmtFull(amount-lim)):(' · còn '+fmtFull(bs.remain))} <button class="mini-edit" onclick="event.stopPropagation();setCatLimit('${catId}')">✏️</button></div>`;
+      const barCol = bs.over?'#dc2626':(bs.pct>=85?'#f59e0b':col);
+      // 1 thanh duy nhất thể hiện mức chi so với hạn mức
+      barHtml=`<div class="t2" style="height:7px;background:#eef2f7;border-radius:4px;margin-top:6px;overflow:hidden">
+        <div style="width:${Math.min(bs.pct,100).toFixed(0)}%;height:100%;background:${barCol}"></div></div>`;
+      // Số gọn 1 dòng: đã chi / hạn mức + trạng thái
+      limHtml=`<div class="lim-line ${bs.over?'over':''}">
+        <span class="num">${fmtShort(amount)}</span><span class="lim-sep">/</span><span class="num">${fmtShort(lim)}</span>
+        <span class="lim-badge ${bs.over?'over':(bs.pct>=85?'warn':'ok')}">${bs.over?('vượt '+fmtShort(amount-lim)):(bs.pct>=85?'sắp hết':('còn '+fmtShort(bs.remain)))}</span>
+      </div>`;
     } else {
-      limHtml=`<div class="lim-txt" style="color:#94a3b8;margin-top:5px" onclick="event.stopPropagation();setCatLimit('${catId}')">＋ Đặt hạn mức ›</div>`;
+      barHtml=`<div class="t2" style="height:6px;background:#f1f5f9;border-radius:4px;margin-top:6px;overflow:hidden">
+        <div style="width:${Math.max(pct,2).toFixed(0)}%;height:100%;background:${col}"></div></div>`;
     }
+  } else {
+    barHtml=`<div class="t2" style="height:6px;background:#f1f5f9;border-radius:4px;margin-top:6px;overflow:hidden">
+      <div style="width:${Math.max(pct,2).toFixed(0)}%;height:100%;background:${col}"></div></div>`;
   }
-  return `<div class="item drill-row" ${onclick} style="cursor:pointer">
-    <div class="info">
+  return `<div class="item drill-row" style="cursor:pointer">
+    <div class="info" ${onclick}>
       <div class="t1">${isSuper?'📦 ':''}${esc(name)} <span style="color:var(--sub);font-weight:500;font-size:12px">(${pct.toFixed(0)}%)</span></div>
-      <div class="t2" style="height:6px;background:#f1f5f9;border-radius:4px;margin-top:6px;overflow:hidden">
-        <div style="width:${Math.max(pct,2).toFixed(0)}%;height:100%;background:${col}"></div></div>
+      ${barHtml}
       ${limHtml}
     </div>
-    <div class="amt minus num">${fmtFull(amount)}</div>
-    <span class="chev">›</span>
+    <div class="amt minus num" ${onclick}>${fmtFull(amount)}</div>
+    ${kb || '<span class="chev">›</span>'}
   </div>`;
+}
+function clearCatLimit(catId){
+  const p=proj(); if(!p||!p.catLimits) return;
+  delete p.catLimits[catId]; save(); renderAll(); toast('Đã bỏ hạn mức '+catName(catId));
 }
 function jsq(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 function fmtDate(d){ if(!d) return ''; const p=d.split('-'); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:d; }
@@ -2308,7 +2336,7 @@ function drillOpenSubDirect(where,name){ const st=DRILL[where]; st.level=2; st.p
 /* ---------- THU / TẠM ỨNG ---------- */
 function renderThu(p){
   const t = totals(p);
-  const list = [...p.income].sort((a,b)=>fmtDT(b).localeCompare(fmtDT(a)));
+  const list = [...p.income].sort((a,b)=>dtSortKey(b).localeCompare(dtSortKey(a)));
   const sum = list.reduce((s,x)=>s+Number(x.amount||0),0);
   // số đợt theo loại
   const paidRounds = p.income.filter(x=>x.type!=='adv').length;
@@ -2373,7 +2401,7 @@ function attBadge(x){ const n=(x.att||[]).length; return n?` <span class="pill a
 function statusPill(x){ const id=x.payStatus||'paid'; if(id==='paid') return ''; const s=payStatus(id); return ` <span class="pill st-${id}">${s.icon} ${s.name}</span>`; }
 function renderChi(p){
   const sorters={
-    time:(a,b)=>fmtDT(b).localeCompare(fmtDT(a)),
+    time:(a,b)=>dtSortKey(b).localeCompare(dtSortKey(a)),
     az:(a,b)=>(a.note||'').localeCompare(b.note||'','vi'),
     amount:(a,b)=>Number(b.amount||0)-Number(a.amount||0)
   };
@@ -4456,7 +4484,7 @@ async function exportReport(){
       sd.push([{v:stt+'. '+p.name,bold:true,color:C.headTxt,fill:C.locBg,border:true,align:'left'},
         ...Array(6).fill({v:'',fill:C.locBg,border:true}), {v:'',fill:C.locBg,border:true}]);
       COST_CATS.forEach(c=>{
-        const list=p.costs.filter(x=>x.cat===c.id).sort((a,b)=>fmtDT(b).localeCompare(fmtDT(a)));
+        const list=p.costs.filter(x=>x.cat===c.id).sort((a,b)=>dtSortKey(b).localeCompare(dtSortKey(a)));
         if(!list.length) return;
         let sub=0;
         list.forEach((x,i)=>{ sub+=Number(x.amount||0); const hv=x.hasVat!==false;
@@ -4528,7 +4556,7 @@ async function exportReport(){
       let sub=0;
       si.push([{v:'💰 '+p.name,bold:true,color:C.headTxt,fill:C.locBg,border:true,align:'left'},
         {v:'',fill:C.locBg,border:true},{v:'',fill:C.locBg,border:true},{v:'',fill:C.locBg,border:true},{v:'',fill:C.locBg,border:true}]);
-      [...p.income].sort((a,b)=>fmtDT(b).localeCompare(fmtDT(a))).forEach((x,i)=>{
+      [...p.income].sort((a,b)=>dtSortKey(b).localeCompare(dtSortKey(a))).forEach((x,i)=>{
         sub+=Number(x.amount||0); const f=i%2===1?C.band:undefined;
         si.push([{v:'   '+(x.type==='adv'?'Tạm ứng':'Thanh toán'),border:true,align:'left',fill:f},
           {v:x.note||'',border:true,align:'left',fill:f},{v:fmtDT(x),border:true,align:'center',fill:f},
