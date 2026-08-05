@@ -763,7 +763,7 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 <div class="asheet" id="asheet"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-var APP_VERSION = 'v2026.08.05-12';  // đổi mỗi lần cập nhật để kiểm tra OTA
+var APP_VERSION = 'v2026.08.05-14';  // đổi mỗi lần cập nhật để kiểm tra OTA
 /* ==================== MENU 3 CHẤM (KEBAB) dùng chung ==================== */
 function kebab(items){
   const id='kb'+Math.random().toString(36).slice(2,8);
@@ -1027,6 +1027,7 @@ function migrate(db){
     // nhóm thanh toán (đội thầu phụ / nhà cung cấp / máy) + đợt thanh toán
     if(!Array.isArray(p.payGroups)) p.payGroups=[];
     if(!p.catLimits || typeof p.catLimits!=='object') p.catLimits={};
+    if(!p.groupLimits || typeof p.groupLimits!=='object') p.groupLimits={};
     // Sửa chữa ngày cũ bị sai định dạng (dd/mm/yyyy → yyyy-mm-dd) để sắp xếp đúng
     ['income','costs'].forEach(function(k){
       (p[k]||[]).forEach(function(x){
@@ -2234,7 +2235,7 @@ function renderDrill(where){
     if(!groups.length){ el.innerHTML=head+'<div class="empty">Chưa có chi phí nào</div>'; return; }
     body=`<div class="drill-total">Tổng: <b class="num">${fmtFull(total)}</b></div>`+
       groups.map((g,i)=>rowBar(g.name,g.amount,g.pct,groupColor(i),g.isSuper,
-        `onclick="${g.isSuper?`drillOpenParent('${where}','${jsq(g.name)}')`:`drillOpenSubDirect('${where}','${jsq(g.name)}')`}"`, g.cat)).join('');
+        `onclick="${g.isSuper?`drillOpenParent('${where}','${jsq(g.name)}')`:`drillOpenSubDirect('${where}','${jsq(g.name)}')`}"`, g.name)).join('');
   }
   else if(st.level===1){
     // Cấp 1: nhóm con bên trong nhóm cha
@@ -2266,25 +2267,25 @@ function renderDrill(where){
 }
 
 // Một dòng nhóm có % + thanh màu (kiểu Finance Assist)
-function rowBar(name,amount,pct,col,isSuper,onclick,catId){
+// limitKey = tên nhóm để đặt hạn mức RIÊNG cho từng nhóm (Thép, Bê tông…)
+function rowBar(name,amount,pct,col,isSuper,onclick,limitKey){
   let barHtml, limHtml='', kb='';
-  if(catId){
+  if(limitKey){
     const p=proj();
-    const lim=Number((p.catLimits||{})[catId]||0);
-    // Menu 3 chấm cho danh mục: đặt/sửa/bỏ hạn mức
+    if(!p.groupLimits) p.groupLimits={};
+    const lim=Number(p.groupLimits[limitKey]||0);
+    const kq=jsq(limitKey);
     kb = kebab(lim>0 ? [
-      {label:'Sửa hạn mức', icon:'✏️', fn:`setCatLimit('${catId}')`},
-      {label:'Bỏ hạn mức', icon:'🗑️', danger:true, fn:`clearCatLimit('${catId}')`}
+      {label:'Sửa hạn mức', icon:'✏️', fn:`setGroupLimit('${kq}')`},
+      {label:'Bỏ hạn mức', icon:'🗑️', danger:true, fn:`clearGroupLimit('${kq}')`}
     ] : [
-      {label:'Đặt hạn mức', icon:'🎯', fn:`setCatLimit('${catId}')`}
+      {label:'Đặt hạn mức', icon:'🎯', fn:`setGroupLimit('${kq}')`}
     ]);
     if(lim>0){
       const bs=budgetStatus(lim, amount);
       const barCol = bs.over?'#dc2626':(bs.pct>=85?'#f59e0b':col);
-      // 1 thanh duy nhất thể hiện mức chi so với hạn mức
       barHtml=`<div class="t2" style="height:7px;background:#eef2f7;border-radius:4px;margin-top:6px;overflow:hidden">
         <div style="width:${Math.min(bs.pct,100).toFixed(0)}%;height:100%;background:${barCol}"></div></div>`;
-      // Số gọn 1 dòng: đã chi / hạn mức + trạng thái
       limHtml=`<div class="lim-line ${bs.over?'over':''}">
         <span class="num">${fmtShort(amount)}</span><span class="lim-sep">/</span><span class="num">${fmtShort(lim)}</span>
         <span class="lim-badge ${bs.over?'over':(bs.pct>=85?'warn':'ok')}">${bs.over?('vượt '+fmtShort(amount-lim)):(bs.pct>=85?'sắp hết':('còn '+fmtShort(bs.remain)))}</span>
@@ -2307,9 +2308,21 @@ function rowBar(name,amount,pct,col,isSuper,onclick,catId){
     ${kb || '<span class="chev">›</span>'}
   </div>`;
 }
-function clearCatLimit(catId){
-  const p=proj(); if(!p||!p.catLimits) return;
-  delete p.catLimits[catId]; save(); renderAll(); toast('Đã bỏ hạn mức '+catName(catId));
+function setGroupLimit(key){
+  const p=proj(); if(!p) return;
+  if(!p.groupLimits) p.groupLimits={};
+  const cur=p.groupLimits[key]||'';
+  askText('Hạn mức cho nhóm "'+key+'"', 'Nhập số tiền (để trống = bỏ)', cur?String(cur):'', function(val){
+    const n=Math.trunc(Number(String(val).replace(/[^\d]/g,''))||0);
+    if(!p.groupLimits) p.groupLimits={};
+    if(n>0) p.groupLimits[key]=n; else delete p.groupLimits[key];
+    save(); renderAll();
+    toast(n>0?('Đã đặt hạn mức '+key+': '+fmtShort(n)):('Đã bỏ hạn mức '+key));
+  });
+}
+function clearGroupLimit(key){
+  const p=proj(); if(!p||!p.groupLimits) return;
+  delete p.groupLimits[key]; save(); renderAll(); toast('Đã bỏ hạn mức '+key);
 }
 function jsq(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 function fmtDate(d){ if(!d) return ''; const p=d.split('-'); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:d; }
@@ -2427,6 +2440,7 @@ function renderChi(p){
       ${CHI_SEARCH?`<button class="search-x" onclick="chiSetSearch('')">✕</button>`:''}
     </div>
     ${p.costs.length?`<div class="seg sortSeg" style="margin-top:10px">${chiSortSeg}</div>`:''}
+    <div class="hint" style="margin-top:8px">${list.length===p.costs.length?`Hiển thị tất cả ${p.costs.length} giao dịch`:`Hiển thị ${list.length}/${p.costs.length} giao dịch (đang lọc)`}</div>
     <div style="margin-top:10px">
     ${list.length? list.map(x=>{
       const pg=x.payGroup?pgById(p,x.payGroup):null;
