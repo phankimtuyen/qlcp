@@ -626,6 +626,12 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 .lim-badge.ok{background:#ecfdf5;color:#059669}
 .lim-badge.warn{background:#fffbeb;color:#d97706}
 .lim-badge.over{background:#fef2f2;color:#dc2626}
+/* Nhóm giao dịch theo ngày (kiểu Money Lover) */
+.day-group{margin-bottom:6px}
+.day-head{display:flex;align-items:center;justify-content:space-between;padding:8px 4px 6px;border-bottom:1.5px solid var(--line);margin-bottom:2px}
+.day-when{font-size:13px;color:var(--sub)}
+.day-when b{color:var(--ink);font-size:14px}
+.day-sum{font-size:13.5px;font-weight:700;color:var(--cost)}
 /* Module phiên bản + cập nhật nổi bật */
 .ver-card{background:var(--hero);color:#fff;border-radius:18px;padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow-hero)}
 .ver-card .vc-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
@@ -763,7 +769,7 @@ details{margin-top:8px}summary{cursor:pointer;font-size:13px;color:var(--primary
 <div class="asheet" id="asheet"></div>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-var APP_VERSION = 'v2026.08.05-14';  // đổi mỗi lần cập nhật để kiểm tra OTA
+var APP_VERSION = 'v2026.08.05-15';  // đổi mỗi lần cập nhật để kiểm tra OTA
 /* ==================== MENU 3 CHẤM (KEBAB) dùng chung ==================== */
 function kebab(items){
   const id='kb'+Math.random().toString(36).slice(2,8);
@@ -2440,30 +2446,61 @@ function renderChi(p){
       ${CHI_SEARCH?`<button class="search-x" onclick="chiSetSearch('')">✕</button>`:''}
     </div>
     ${p.costs.length?`<div class="seg sortSeg" style="margin-top:10px">${chiSortSeg}</div>`:''}
+    ${p.costs.length?`<div class="seg viewSeg" style="margin-top:8px">
+      <button type="button" class="${CHI_VIEW==='date'?'on':''}" onclick="chiSetView('date')">📅 Theo ngày</button>
+      <button type="button" class="${CHI_VIEW==='flat'?'on':''}" onclick="chiSetView('flat')">📋 Danh sách</button>
+    </div>`:''}
     <div class="hint" style="margin-top:8px">${list.length===p.costs.length?`Hiển thị tất cả ${p.costs.length} giao dịch`:`Hiển thị ${list.length}/${p.costs.length} giao dịch (đang lọc)`}</div>
     <div style="margin-top:10px">
-    ${list.length? list.map(x=>{
-      const pg=x.payGroup?pgById(p,x.payGroup):null;
-      return `
-      <div class="item st-${x.payStatus||'paid'}">
-        <div class="info" data-act="edit-row" data-id="${x.id}" style="cursor:pointer;flex:1;min-width:0">
-          <div class="t1">${dupsCost.has(x.id)?'<span class="dup-tag">TRÙNG?</span>':''}${esc(x.note||'(không ghi chú)')} <span class="pill ${catCls(x.cat)}">${catName(x.cat)}</span>${x.hasVat===false?'<span class="pill novat">Không VAT</span>':''}${statusPill(x)}${attBadge(x)}</div>
-          <div class="t2">${fmtDT(x)}${x.group?' · '+esc(x.group):''}${pg?` · <span class="pg-tag">${pg.icon||PG_CAT_ICON[pg.cat]||'📦'} ${esc(pg.name)}${x.dot?(' · '+esc(x.dot)):''}</span>`:''}</div>
-        </div>
-        <div class="thu-right">
-          <div class="amt minus num">${fmtFull(x.amount)}</div>
-          <button type="button" class="more-btn" data-act="more" data-id="${x.id}" aria-label="Tùy chọn">⋮</button>
-        </div>
-      </div>`;}).join('') : '<div class="empty">Chưa có chi phí nào</div>'}
+    ${list.length? ((CHI_VIEW==='date'&&CHI_SORT==='time')? renderCostListByDate(p,list,dupsCost) : list.map(x=>costRowHtml(p,x,dupsCost)).join('')) : '<div class="empty">Chưa có chi phí nào</div>'}
     </div>
     </div></div>
   </div>`;
   renderPayGroupBody(p);
 }
+// 1 dòng giao dịch chi phí
+function costRowHtml(p,x,dupsCost){
+  const pg=x.payGroup?pgById(p,x.payGroup):null;
+  return `
+    <div class="item st-${x.payStatus||'paid'}">
+      <div class="info" data-act="edit-row" data-id="${x.id}" style="cursor:pointer;flex:1;min-width:0">
+        <div class="t1">${dupsCost&&dupsCost.has(x.id)?'<span class="dup-tag">TRÙNG?</span>':''}${esc(x.note||'(không ghi chú)')} <span class="pill ${catCls(x.cat)}">${catName(x.cat)}</span>${x.hasVat===false?'<span class="pill novat">Không VAT</span>':''}${statusPill(x)}${attBadge(x)}</div>
+        <div class="t2">${fmtDT(x)}${x.group?' · '+esc(x.group):''}${pg?` · <span class="pg-tag">${pg.icon||PG_CAT_ICON[pg.cat]||'📦'} ${esc(pg.name)}${x.dot?(' · '+esc(x.dot)):''}</span>`:''}</div>
+      </div>
+      <div class="thu-right">
+        <div class="amt minus num">${fmtFull(x.amount)}</div>
+        <button type="button" class="more-btn" data-act="more" data-id="${x.id}" aria-label="Tùy chọn">⋮</button>
+      </div>
+    </div>`;
+}
+// Danh sách chi phí GOM THEO NGÀY, mỗi ngày có tiêu đề + tổng chi (như Money Lover)
+function renderCostListByDate(p,list,dupsCost){
+  const days=[];       // giữ thứ tự
+  const map={};
+  list.forEach(x=>{
+    const key=dateSortKey(x.date);
+    if(!map[key]){ map[key]={key,date:x.date,items:[],sum:0}; days.push(map[key]); }
+    map[key].items.push(x);
+    map[key].sum+=Number(x.amount||0);
+  });
+  // list đã sắp mới→cũ nên days cũng đúng thứ tự
+  return days.map(d=>{
+    const wd=weekdayVN(d.date);
+    return `<div class="day-group">
+      <div class="day-head">
+        <div class="day-when"><b>${wd||''}</b> · ${fmtDate(d.date)}</div>
+        <div class="day-sum num">${fmtFull(d.sum)}</div>
+      </div>
+      ${d.items.map(x=>costRowHtml(p,x,dupsCost)).join('')}
+    </div>`;
+  }).join('');
+}
 
 /* ---------- CARD QUẢN LÝ NHÓM THANH TOÁN (thầu phụ · NCC · máy) ---------- */
 let PG_SEARCH='', PG_SORT='name';   // sort: name|time|amount
 let CHI_SORT='time';                // sắp xếp danh sách chi phí: time|az|amount
+let CHI_VIEW='date';                 // kiểu xem: date (nhóm theo ngày) | flat (danh sách phẳng)
+function chiSetView(v){ CHI_VIEW=v; renderChi(proj()); }
 let CHI_SEARCH='';                   // tìm kiếm giao dịch chi phí
 function chiSetSort(s){ CHI_SORT=s; const p=proj(); renderChi(p); }
 function chiSetSearch(v){ CHI_SEARCH=v; renderChi(proj()); }
@@ -3865,7 +3902,7 @@ function renderCai(p){
     <h2 style="font-size:14px">📥 Nhập giao dịch (Finance Assist)</h2>
     <div class="dz" onclick="document.getElementById('fileIn').click()">
       <div class="dz-ic">📥</div><div class="dz-t">Chạm để chọn file .xlsx / .csv</div>
-      <div class="hint">Tự nhận diện thu/chi, gộp bút toán kép, quét trùng</div>
+      <div class="hint">Tự nhận diện thu/chi, gộp bút toán kép, quét trùng · Hỗ trợ Finance Assist & Money Lover</div>
     </div>
     <input type="file" id="fileIn" accept=".xlsx,.csv" style="display:none" onchange="handleFile(this.files[0]); this.value=''">
   </div>
